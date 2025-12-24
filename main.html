@@ -1,0 +1,3039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spaceship Game Controller</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background-color: #000000;
+            color: #e2e8f0;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        /* Game Layers */
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        #starfield { z-index: 0; }
+        
+        /* New canvas for drawing lasers, particles, and global effects */
+        #effects-canvas { z-index: 18; pointer-events: none; }
+
+        /* The Spaceship */
+        .spaceship-wrapper {
+            position: absolute;
+            width: 90px;
+            height: 90px;
+            z-index: 20;
+            transform-origin: center center;
+            will-change: transform, top, left;
+            transition: opacity 0.2s; /* For fading out on death */
+        }
+
+        .spaceship-dead {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* Local Shield Canvas (Attached to ship) */
+        .shield-canvas {
+            position: absolute;
+            top: -10px; /* Offset to center the larger canvas (110-90)/2 = 10 */
+            left: -10px;
+            width: 110px; /* Increased from 90px */
+            height: 110px; /* Increased from 90px */
+            z-index: 22; /* Above the ship SVG */
+            pointer-events: none;
+            border-radius: 50%;
+        }
+
+        /* Enemy Ships */
+        .enemy-wrapper {
+            position: absolute;
+            width: 90px;
+            height: 90px;
+            z-index: 15;
+            transform-origin: center center;
+            will-change: transform, top, left;
+        }
+
+        /* Player Laser Beam (Continuous) */
+        .laser-beam {
+            position: absolute;
+            bottom: 50%; 
+            left: 50%;
+            width: 4px;
+            height: 1000px; 
+            background: linear-gradient(to top, rgba(56, 189, 248, 0) 0%, rgba(56, 189, 248, 1) 20%, rgba(186, 230, 253, 1) 100%);
+            transform-origin: bottom center;
+            transform: translateX(-50%) scaleY(0); 
+            opacity: 0;
+            z-index: 5;
+            pointer-events: none;
+            transition: opacity 0.1s;
+            box-shadow: 0 0 15px #38bdf8, 0 0 30px #0ea5e9;
+        }
+
+        .laser-active {
+            opacity: 1;
+        }
+
+        /* Enemy Laser Beam */
+        .enemy-laser-beam {
+            position: absolute;
+            bottom: 50%;
+            left: 50%;
+            width: 4px;
+            height: 1000px;
+            background: linear-gradient(to top, rgba(239, 68, 68, 0) 0%, rgba(239, 68, 68, 1) 20%, rgba(252, 165, 165, 1) 100%);
+            transform-origin: bottom center;
+            transform: translateX(-50%) scaleY(0);
+            opacity: 0;
+            z-index: 5;
+            pointer-events: none;
+            transition: opacity 0.1s;
+            box-shadow: 0 0 15px #ef4444, 0 0 30px #dc2626;
+        }
+
+        .enemy-laser-active {
+            opacity: 1;
+        }
+
+        /* Player Torpedoes */
+        .torpedo {
+            position: absolute;
+            width: 8px;
+            height: 20px;
+            background-color: #f43f5e; 
+            border-radius: 4px;
+            box-shadow: 0 0 10px #f43f5e, 0 0 20px #e11d48;
+            z-index: 10;
+        }
+
+        /* Enemy Torpedoes */
+        .enemy-torpedo {
+            position: absolute;
+            width: 8px;
+            height: 20px;
+            background-color: #fbbf24; /* Amber-400 */
+            border-radius: 4px;
+            box-shadow: 0 0 10px #fbbf24, 0 0 20px #d97706;
+            z-index: 10;
+        }
+
+        /* HUD Overlay */
+        .hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 50;
+            background: rgba(15, 23, 42, 0.8);
+            padding: 1rem;
+            border-radius: 0.75rem;
+            border: 1px solid rgba(51, 65, 85, 0.5);
+            backdrop-filter: blur(4px);
+            pointer-events: none; 
+        }
+        
+        /* Game Over Overlay */
+        #game-over {
+            display: none;
+            position: absolute;
+            inset: 0;
+            z-index: 100;
+            background: rgba(0,0,0,0.7);
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        /* Multiplayer Menu Overlay */
+        #multiplayer-menu {
+            position: absolute;
+            inset: 0;
+            z-index: 200;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        #multiplayer-menu.hidden { display: none; }
+        
+        .menu-panel {
+            background: rgba(30, 41, 59, 0.9);
+            border: 1px solid #334155;
+            border-radius: 1rem;
+            padding: 2rem 3rem;
+            text-align: center;
+            box-shadow: 0 0 40px rgba(6, 182, 212, 0.2);
+        }
+        
+        .menu-panel h1 {
+            font-size: 2.5rem;
+            color: #0ea5e9;
+            margin-bottom: 0.5rem;
+            letter-spacing: 0.3em;
+            text-shadow: 0 0 20px rgba(14, 165, 233, 0.5);
+        }
+        
+        .menu-panel h2 {
+            font-size: 1rem;
+            color: #64748b;
+            margin-bottom: 2rem;
+        }
+        
+        .menu-btn {
+            display: block;
+            width: 100%;
+            padding: 0.75rem 1.5rem;
+            margin: 0.5rem 0;
+            font-family: inherit;
+            font-size: 1rem;
+            border: 1px solid #0ea5e9;
+            background: transparent;
+            color: #0ea5e9;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .menu-btn:hover {
+            background: #0ea5e9;
+            color: #0f172a;
+            box-shadow: 0 0 20px rgba(14, 165, 233, 0.4);
+        }
+        
+        .menu-btn.secondary {
+            border-color: #64748b;
+            color: #64748b;
+        }
+        
+        .menu-btn.secondary:hover {
+            background: #64748b;
+            color: #0f172a;
+        }
+        
+        .menu-input {
+            width: 100%;
+            padding: 0.75rem;
+            margin: 0.5rem 0;
+            font-family: inherit;
+            font-size: 1rem;
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+            border-radius: 0.5rem;
+            text-align: center;
+        }
+        
+        .menu-input:focus {
+            outline: none;
+            border-color: #0ea5e9;
+            box-shadow: 0 0 10px rgba(14, 165, 233, 0.3);
+        }
+        
+        .menu-status {
+            margin-top: 1rem;
+            padding: 0.5rem;
+            font-size: 0.875rem;
+            color: #94a3b8;
+        }
+        
+        .menu-status.success { color: #22c55e; }
+        .menu-status.error { color: #ef4444; }
+        .menu-status.warning { color: #f59e0b; }
+        
+        .room-code {
+            font-size: 2rem;
+            color: #22c55e;
+            letter-spacing: 0.5em;
+            margin: 1rem 0;
+        }
+        
+        /* Remote player ship */
+        .remote-player-wrapper {
+            position: absolute;
+            width: 90px;
+            height: 90px;
+            z-index: 19;
+            transform-origin: center center;
+            will-change: transform;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="starfield"></canvas>
+        <!-- Global Effects Canvas -->
+        <canvas id="effects-canvas"></canvas>
+        
+        <!-- HUD -->
+        <div class="hud">
+            <!-- Mini-ship shield diagram (large, at top) -->
+            <svg id="miniShipDiagram" width="80" height="80" viewBox="-20 -20 40 40">
+                <!-- Front sector (top) -->
+                <path id="shield-front" d="M -8 -2 L 0 -16 L 8 -2 Z" fill="#22c55e" stroke="#1e293b" stroke-width="1"/>
+                <!-- Aft sector (bottom) -->
+                <path id="shield-aft" d="M -8 2 L 0 16 L 8 2 Z" fill="#22c55e" stroke="#1e293b" stroke-width="1"/>
+                <!-- Port sector (left) -->
+                <path id="shield-port" d="M -2 -8 L -16 0 L -2 8 Z" fill="#22c55e" stroke="#1e293b" stroke-width="1"/>
+                <!-- Starboard sector (right) -->
+                <path id="shield-starboard" d="M 2 -8 L 16 0 L 2 8 Z" fill="#22c55e" stroke="#1e293b" stroke-width="1"/>
+                <!-- Center dot (ship) -->
+                <circle cx="0" cy="0" r="3" fill="#64748b"/>
+            </svg>
+            <!-- Ship Status Section: Hull, Laser, Torpedoes -->
+            <div class="mt-2 flex items-center gap-2 text-xs text-slate-400">
+                <span>HULL</span>
+                <div class="flex-1 h-3 bg-slate-700 rounded overflow-hidden">
+                    <div id="hullBar" class="h-full bg-green-500 transition-all duration-200" style="width: 100%;"></div>
+                </div>
+                <span id="hullStatus" class="w-8 text-right font-bold">100</span>%
+            </div>
+            <div class="mt-2 space-y-2">
+                <!-- Laser with recharge bar -->
+                <div class="text-xs text-slate-500 flex items-center gap-2">
+                    <span>LASER</span>
+                    <div class="flex-1 h-2 bg-slate-700 rounded overflow-hidden">
+                        <div id="laserBar" class="h-full bg-cyan-400 transition-all duration-100" style="width: 100%;"></div>
+                    </div>
+                    <span id="laserStatus" class="w-12 text-right text-cyan-400 text-[10px]">READY</span>
+                </div>
+                <!-- Torpedoes with visual pips -->
+                <div class="text-xs text-slate-500 flex items-center gap-2">
+                    <span>FWD</span>
+                    <div id="fwdTorpPips" class="flex gap-0.5"></div>
+                    <span class="text-slate-600 mx-1">|</span>
+                    <span>AFT</span>
+                    <div id="aftTorpPips" class="flex gap-0.5"></div>
+                </div>
+            </div>
+            <!-- Enemy Section -->
+            <div class="mt-3 pt-3 border-t border-slate-700">
+                <div class="text-xs text-slate-500 flex items-center gap-2">
+                    <span>ENEMIES</span>
+                    <div id="enemyPips" class="flex gap-0.5 flex-wrap"></div>
+                </div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-slate-700">
+                <div class="text-[10px] text-slate-500">CONTROLS</div>
+                <div class="text-xs text-slate-400">Numpad/Arrows: Move</div>
+                <div class="text-xs text-slate-400">Space: Laser</div>
+                <div class="text-xs text-slate-400">Shift: Fwd Torpedo</div>
+                <div class="text-xs text-slate-400">Z: Aft Torpedo</div>
+            </div>
+        </div>
+        
+        <div id="game-over" class="hidden">
+            <h1 class="text-6xl text-red-500 font-bold mb-4 tracking-widest">YOU DIED</h1>
+            <p class="text-slate-300">SHIP DESTROYED</p>
+            <button onclick="location.reload()" class="mt-8 px-6 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition pointer-events-auto">RESTART</button>
+        </div>
+        
+        <!-- Multiplayer Menu -->
+        <div id="multiplayer-menu">
+            <div class="menu-panel" id="main-menu-panel">
+                <h1>SPACESHIP</h1>
+                <h2>LAN MULTIPLAYER</h2>
+                <button class="menu-btn" id="btn-single">SINGLE PLAYER</button>
+                <button class="menu-btn" id="btn-host">HOST GAME</button>
+                <button class="menu-btn secondary" id="btn-join">JOIN GAME</button>
+            </div>
+            
+            <div class="menu-panel hidden" id="host-panel">
+                <h1>HOSTING</h1>
+                <p class="text-slate-400">Waiting for player...</p>
+                <input class="menu-input" id="server-address" placeholder="Server IP:Port" value="localhost:8080" />
+                <button class="menu-btn" id="btn-start-host">START HOST</button>
+                <div class="room-code hidden" id="room-code-display"></div>
+                <div class="menu-status" id="host-status"></div>
+                <button class="menu-btn secondary" id="btn-host-back">BACK</button>
+            </div>
+            
+            <div class="menu-panel hidden" id="join-panel">
+                <h1>JOIN GAME</h1>
+                <input class="menu-input" id="join-server" placeholder="Server IP:Port" value="localhost:8080" />
+                <input class="menu-input" id="room-code-input" placeholder="Room Code (4 digits)" maxlength="4" />
+                <button class="menu-btn" id="btn-connect">CONNECT</button>
+                <div class="menu-status" id="join-status"></div>
+                <button class="menu-btn secondary" id="btn-join-back">BACK</button>
+            </div>
+        </div>
+
+        <!-- Enemies Container -->
+        <div id="enemies-container"></div>
+
+        <!-- Spaceship Entity -->
+        <div id="spaceship" class="spaceship-wrapper">
+            <!-- Local Shield Canvas (Rotates with ship) -->
+            <canvas id="player-shield" class="shield-canvas" width="110" height="110"></canvas>
+            
+            <!-- Player Laser -->
+            <div id="laser" class="laser-beam"></div>
+
+            <!-- SVG Graphic -->
+            <svg viewBox="0 0 90 90" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full filter drop-shadow-[0_0_12px_rgba(6,182,212,0.5)]">
+                <path d="M28 82 L35 75 L42 82 L35 90 Z" fill="#f59e0b" />
+                <path d="M48 82 L55 75 L62 82 L55 90 Z" fill="#f59e0b" />
+                <path d="M45 5 L85 75 L45 65 L5 75 Z" fill="#cbd5e1" stroke="#475569" stroke-width="2"/>
+                <path d="M45 15 L55 60 L45 55 L35 60 Z" fill="#94a3b8"/>
+                <circle cx="45" cy="40" r="4" fill="#0ea5e9" />
+                <rect x="25" y="65" width="10" height="15" fill="#475569" />
+                <rect x="55" y="65" width="10" height="15" fill="#475569" />
+            </svg>
+        </div>
+        
+        <!-- Projectiles Container -->
+        <div id="projectiles"></div>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        const MOVE_SPEED = 120;  // Player is faster than enemies
+        const ROTATION_SPEED = 360;
+        const TORPEDO_SPEED = MOVE_SPEED * 3; // 3x ship speed
+        const ENEMY_SPEED = 60; 
+        const ENEMY_ROT_SPEED = 120; 
+        const SCREEN_PADDING = 45; 
+        const LASER_LENGTH = 1000;
+        const SHIP_RADIUS = 55; 
+        
+        // Combat Config
+        const ENEMY_FIRE_RATE = 2000; 
+        const SHIELD_DECAY = 2.0; 
+        const SECTOR_MAX_SHIELD = 100; // Per-sector shield strength
+        const MAX_HULL = 100;          // Ship-wide hull strength
+        
+        // Torpedo Ammo Config
+        const MAX_FORWARD_TORPEDOES = 12;
+        const MAX_AFT_TORPEDOES = 5;
+        const TORPEDO_RECHARGE_TIME = 5; // 5 seconds per torpedo
+        
+        // Laser Config
+        const LASER_BURST_DURATION = 0.5; // 0.5 second burst
+        const LASER_RECHARGE_TIME = 10;   // 10 second recharge
+        
+        // Enemy Laser Config (same timing as player)
+        const ENEMY_LASER_BURST_DURATION = 0.5;
+        const ENEMY_LASER_RECHARGE_TIME = 10;
+        const ENEMY_SECTOR_MAX_SHIELD = 15; // Weaker than player's 100
+        
+        // Network Protocol Config
+        const PROTOCOL_VERSION = 1;
+        const NETWORK_TICK_RATE = 30; // 30 Hz sync rate
+        const NETWORK_TICK_MS = 1000 / NETWORK_TICK_RATE;
+        const BOUNCE_SPEED = 5; // 5 px/tick
+        const BOUNCE_DURATION = 7; // 7 ticks
+        
+        // Network State
+        const networkState = {
+            isMultiplayer: false,
+            isHost: false,
+            connected: false,
+            socket: null,
+            roomCode: null,
+            gameWidth: window.innerWidth,
+            gameHeight: window.innerHeight,
+            frame: 0,
+            lastNetworkTick: 0,
+            // Remote player state (will be populated on connection)
+            remotePlayer: null,
+            remotePlayerEl: null,
+            // Ship images (16 rotations at 22.5° intervals)
+            localShipImages: [],  // Our pre-rendered rotations
+            remoteShipImages: [], // Their pre-rendered rotations
+            enemyShipImages: [],  // Enemy pre-rendered rotations (from host)
+            // Entity ID management (host assigns)
+            nextEnemyId: 0,
+            nextTorpedoId: 0,
+            // Pending enemy torpedo fires to sync to client
+            pendingEnemyTorpedoes: [],
+            // Pending visual effects to sync to client
+            pendingEffects: []
+        };
+
+        // --- State Management ---
+        const gameState = {
+            keys: new Set(),
+            ship: {
+                x: window.innerWidth / 2,
+                y: window.innerHeight / 2,
+                rotation: 0, 
+                targetRotation: 0, 
+                isMoving: false,
+                isFiringLaser: false,
+                laserBurstTimer: 0,      // Time remaining in current burst
+                laserRechargeTimer: 0,   // Time until laser is ready
+                laserReady: true,        // Is laser available to fire
+                forwardTorpedoes: MAX_FORWARD_TORPEDOES,
+                aftTorpedoes: MAX_AFT_TORPEDOES,
+                shieldHits: [],          // Each hit: { sector, angle, intensity, color }
+                shieldSectors: {
+                    front: SECTOR_MAX_SHIELD,
+                    starboard: SECTOR_MAX_SHIELD,
+                    aft: SECTOR_MAX_SHIELD,
+                    port: SECTOR_MAX_SHIELD
+                },
+                hullHealth: MAX_HULL,
+                laserOfflineTimer: 0,         // Seconds until laser comes back online
+                fwdTorpedoOfflineTimer: 0,    // Seconds until forward torpedoes online
+                aftTorpedoOfflineTimer: 0,    // Seconds until aft torpedoes online
+                fwdTargetingTimer: 0,         // Seconds of forward targeting inaccuracy
+                aftTargetingTimer: 0,         // Seconds of aft targeting inaccuracy
+                fwdRechargeTimer: 0,          // Timer for recharging forward torpedoes
+                aftRechargeTimer: 0,          // Timer for recharging aft torpedoes
+                speedReduced: false,
+                alive: true
+            },
+            enemies: [], 
+            torpedoes: [], 
+            enemyTorpedoes: [], 
+            particles: [], // Explosion particles
+            explosionRings: [], // Ring-based explosions
+            lastTime: 0,
+            shiftPressed: false,
+            ctrlPressed: false
+        };
+
+        // --- DOM Elements ---
+        const shipEl = document.getElementById('spaceship');
+        const laserEl = document.getElementById('laser');
+        const projectilesContainer = document.getElementById('projectiles');
+        const enemiesContainer = document.getElementById('enemies-container');
+        const enemyPips = document.getElementById('enemyPips');
+        // Mini-ship shield diagram elements
+        const shieldFrontEl = document.getElementById('shield-front');
+        const shieldAftEl = document.getElementById('shield-aft');
+        const shieldPortEl = document.getElementById('shield-port');
+        const shieldStarboardEl = document.getElementById('shield-starboard');
+        const hudLaser = document.getElementById('laserStatus');
+        const laserBar = document.getElementById('laserBar');
+        const fwdTorpPips = document.getElementById('fwdTorpPips');
+        const aftTorpPips = document.getElementById('aftTorpPips');
+        const hudHull = document.getElementById('hullStatus');
+        const hullBar = document.getElementById('hullBar');
+        const gameOverEl = document.getElementById('game-over');
+        
+        // Canvases
+        const effectsCanvas = document.getElementById('effects-canvas');
+        const effectsCtx = effectsCanvas.getContext('2d');
+        const shieldCanvas = document.getElementById('player-shield');
+        const shieldCtx = shieldCanvas.getContext('2d');
+        
+        // Multiplayer Menu Elements
+        const multiplayerMenu = document.getElementById('multiplayer-menu');
+        const mainMenuPanel = document.getElementById('main-menu-panel');
+        const hostPanel = document.getElementById('host-panel');
+        const joinPanel = document.getElementById('join-panel');
+        const roomCodeDisplay = document.getElementById('room-code-display');
+        const hostStatus = document.getElementById('host-status');
+        const joinStatus = document.getElementById('join-status');
+        
+        // Player ship SVG (used for generating rotated images)
+        const PLAYER_SHIP_SVG = `
+            <svg viewBox="0 0 90 90" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M28 82 L35 75 L42 82 L35 90 Z" fill="#f59e0b" />
+                <path d="M48 82 L55 75 L62 82 L55 90 Z" fill="#f59e0b" />
+                <path d="M45 5 L85 75 L45 65 L5 75 Z" fill="#cbd5e1" stroke="#475569" stroke-width="2"/>
+                <path d="M45 15 L55 60 L45 55 L35 60 Z" fill="#94a3b8"/>
+                <circle cx="45" cy="40" r="4" fill="#0ea5e9" />
+                <rect x="25" y="65" width="10" height="15" fill="#475569" />
+                <rect x="55" y="65" width="10" height="15" fill="#475569" />
+            </svg>`;
+        
+        const ENEMY_SHIP_SVG = `
+            <svg viewBox="0 0 90 90" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="45" cy="50" r="15" fill="#7f1d1d" opacity="0.8" />
+                <path d="M45 10 L75 70 L45 80 L15 70 Z" fill="#991b1b" stroke="#fca5a5" stroke-width="2"/>
+                <circle cx="45" cy="45" r="6" fill="#fca5a5" />
+                <path d="M15 70 L5 80 L25 75 Z" fill="#450a0a" />
+                <path d="M75 70 L85 80 L65 75 Z" fill="#450a0a" />
+            </svg>`;
+        
+        // --- Multiplayer Menu Handlers ---
+        
+        document.getElementById('btn-single').addEventListener('click', () => {
+            multiplayerMenu.classList.add('hidden');
+            startGame(false); // Single player
+        });
+        
+        document.getElementById('btn-host').addEventListener('click', () => {
+            mainMenuPanel.classList.add('hidden');
+            hostPanel.classList.remove('hidden');
+        });
+        
+        document.getElementById('btn-join').addEventListener('click', () => {
+            mainMenuPanel.classList.add('hidden');
+            joinPanel.classList.remove('hidden');
+        });
+        
+        document.getElementById('btn-host-back').addEventListener('click', () => {
+            hostPanel.classList.add('hidden');
+            mainMenuPanel.classList.remove('hidden');
+            if (networkState.socket) {
+                networkState.socket.close();
+                networkState.socket = null;
+            }
+        });
+        
+        document.getElementById('btn-join-back').addEventListener('click', () => {
+            joinPanel.classList.add('hidden');
+            mainMenuPanel.classList.remove('hidden');
+            if (networkState.socket) {
+                networkState.socket.close();
+                networkState.socket = null;
+            }
+        });
+        
+        document.getElementById('btn-start-host').addEventListener('click', () => {
+            const serverAddr = document.getElementById('server-address').value;
+            hostStatus.textContent = 'Connecting to server...';
+            hostStatus.className = 'menu-status warning';
+            connectAsHost(serverAddr);
+        });
+        
+        document.getElementById('btn-connect').addEventListener('click', () => {
+            const serverAddr = document.getElementById('join-server').value;
+            const roomCode = document.getElementById('room-code-input').value;
+            if (roomCode.length !== 4) {
+                joinStatus.textContent = 'Please enter a 4-digit room code';
+                joinStatus.className = 'menu-status error';
+                return;
+            }
+            joinStatus.textContent = 'Connecting...';
+            joinStatus.className = 'menu-status warning';
+            connectAsClient(serverAddr, roomCode);
+        });
+        
+        // --- Network Connection Functions ---
+        
+        function connectAsHost(serverAddr) {
+            try {
+                const socket = new WebSocket(`ws://${serverAddr}`);
+                networkState.socket = socket;
+                
+                socket.onopen = () => {
+                    hostStatus.textContent = 'Connected! Creating room...';
+                    socket.send(JSON.stringify({
+                        type: 'HOST',
+                        screenW: window.innerWidth,
+                        screenH: window.innerHeight
+                    }));
+                };
+                
+                socket.onmessage = (event) => {
+                    const msg = JSON.parse(event.data);
+                    handleHostMessage(msg);
+                };
+                
+                socket.onerror = () => {
+                    hostStatus.textContent = 'Connection failed';
+                    hostStatus.className = 'menu-status error';
+                };
+                
+                socket.onclose = () => {
+                    if (networkState.connected) {
+                        handleDisconnect();
+                    }
+                };
+            } catch (e) {
+                hostStatus.textContent = 'Invalid server address';
+                hostStatus.className = 'menu-status error';
+            }
+        }
+        
+        function connectAsClient(serverAddr, roomCode) {
+            try {
+                const socket = new WebSocket(`ws://${serverAddr}`);
+                networkState.socket = socket;
+                
+                socket.onopen = () => {
+                    joinStatus.textContent = 'Connected! Joining room...';
+                    socket.send(JSON.stringify({
+                        type: 'JOIN',
+                        roomCode: roomCode,
+                        screenW: window.innerWidth,
+                        screenH: window.innerHeight
+                    }));
+                };
+                
+                socket.onmessage = (event) => {
+                    const msg = JSON.parse(event.data);
+                    handleClientMessage(msg);
+                };
+                
+                socket.onerror = () => {
+                    joinStatus.textContent = 'Connection failed';
+                    joinStatus.className = 'menu-status error';
+                };
+                
+                socket.onclose = () => {
+                    if (networkState.connected) {
+                        handleDisconnect();
+                    }
+                };
+            } catch (e) {
+                joinStatus.textContent = 'Invalid server address';
+                joinStatus.className = 'menu-status error';
+            }
+        }
+        
+        function handleHostMessage(msg) {
+            switch (msg.type) {
+                case 'HOSTED':
+                    networkState.roomCode = msg.roomCode;
+                    networkState.isHost = true;
+                    roomCodeDisplay.textContent = msg.roomCode;
+                    roomCodeDisplay.classList.remove('hidden');
+                    hostStatus.textContent = 'Waiting for player to join...';
+                    hostStatus.className = 'menu-status success';
+                    break;
+                    
+                case 'CLIENT_JOINED':
+                    hostStatus.textContent = 'Player joined! Starting game...';
+                    break;
+                    
+                case 'SCREEN_SIZE':
+                    networkState.gameWidth = msg.gameW;
+                    networkState.gameHeight = msg.gameH;
+                    resizeGameArea(msg.gameW, msg.gameH);
+                    // Host generates ship images to be ready for exchange
+                    generateShipImages();
+                    break;
+                    
+                case 'SHIP_IMAGES':
+                    // Received client's ship images
+                    networkState.remoteShipImages = msg.images;
+                    // Send our ship and enemy images
+                    sendShipImages('player', networkState.localShipImages);
+                    sendShipImages('enemy', networkState.enemyShipImages);
+                    // Start multiplayer game
+                    networkState.isMultiplayer = true;
+                    networkState.connected = true;
+                    multiplayerMenu.classList.add('hidden');
+                    startGame(true);
+                    break;
+                    
+                case 'MOVE':
+                    // Client sent their movement
+                    if (msg.player && networkState.remotePlayer) {
+                        networkState.remotePlayer.dx = msg.player.dx;
+                        networkState.remotePlayer.dy = msg.player.dy;
+                        networkState.remotePlayer.targetRotation = msg.player.angle;
+                    }
+                    break;
+                    
+                case 'FIRE':
+                    handleRemoteFire(msg);
+                    break;
+                    
+                case 'DEATH':
+                    handleRemoteDeath(msg);
+                    break;
+                    
+                case 'DISCONNECT':
+                    handleDisconnect();
+                    break;
+            }
+        }
+        
+        function handleClientMessage(msg) {
+            switch (msg.type) {
+                case 'JOINED':
+                    joinStatus.textContent = 'Joined! Exchanging ship data...';
+                    break;
+                    
+                case 'REJECT':
+                    joinStatus.textContent = msg.reason;
+                    joinStatus.className = 'menu-status error';
+                    break;
+                    
+                case 'SCREEN_SIZE':
+                    networkState.gameWidth = msg.gameW;
+                    networkState.gameHeight = msg.gameH;
+                    resizeGameArea(msg.gameW, msg.gameH);
+                    // Send our ship images to host
+                    generateShipImages().then(() => {
+                        sendShipImages('player', networkState.localShipImages);
+                    });
+                    break;
+                    
+                case 'SHIP_IMAGES':
+                    if (msg.entityType === 'player') {
+                        networkState.remoteShipImages = msg.images;
+                    } else if (msg.entityType === 'enemy') {
+                        networkState.enemyShipImages = msg.images;
+                    }
+                    // Check if we have all images
+                    if (networkState.remoteShipImages.length > 0 && networkState.enemyShipImages.length > 0) {
+                        networkState.isMultiplayer = true;
+                        networkState.isHost = false;
+                        networkState.connected = true;
+                        multiplayerMenu.classList.add('hidden');
+                        startGame(true);
+                    }
+                    break;
+                    
+                case 'MOVE':
+                    applyHostMovements(msg);
+                    break;
+                    
+                case 'SPAWN':
+                    handleRemoteSpawn(msg);
+                    break;
+                    
+                case 'DELETE':
+                    handleRemoteDelete(msg);
+                    break;
+                    
+                case 'FIRE':
+                    handleRemoteFire(msg);
+                    break;
+                    
+                case 'DAMAGE':
+                    applyDamageFromHost(msg);
+                    break;
+                    
+                case 'COLLISION':
+                    applyCollisionFromHost(msg);
+                    break;
+                    
+                case 'DEATH':
+                    handleRemoteDeath(msg);
+                    break;
+                    
+                case 'ENEMY_FIRE':
+                    handleEnemyFire(msg);
+                    break;
+                    
+                case 'REMOTE_DAMAGE':
+                    applyRemoteDamageFromHost(msg);
+                    break;
+                    
+                case 'DISCONNECT':
+                    handleDisconnect();
+                    break;
+            }
+        }
+        
+        function handleDisconnect() {
+            networkState.connected = false;
+            alert('Other player disconnected');
+            location.reload();
+        }
+        
+        // --- Ship Image Generation (16 rotations at 22.5°) ---
+        
+        async function generateShipImages() {
+            networkState.localShipImages = await renderRotatedImages(PLAYER_SHIP_SVG);
+            networkState.enemyShipImages = await renderRotatedImages(ENEMY_SHIP_SVG);
+        }
+        
+        async function renderRotatedImages(svgString) {
+            const images = [];
+            const canvas = document.createElement('canvas');
+            canvas.width = 90;
+            canvas.height = 90;
+            const ctx = canvas.getContext('2d');
+            
+            // Create image from SVG
+            const blob = new Blob([svgString], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            const img = new Image();
+            
+            await new Promise(resolve => {
+                img.onload = resolve;
+                img.src = url;
+            });
+            
+            // Generate 16 rotations (0°, 22.5°, 45°, ...)
+            for (let i = 0; i < 16; i++) {
+                const angle = i * 22.5;
+                ctx.clearRect(0, 0, 90, 90);
+                ctx.save();
+                ctx.translate(45, 45);
+                ctx.rotate(angle * Math.PI / 180);
+                ctx.translate(-45, -45);
+                ctx.drawImage(img, 0, 0, 90, 90);
+                ctx.restore();
+                images.push({
+                    angle: angle,
+                    data: canvas.toDataURL('image/png')
+                });
+            }
+            
+            URL.revokeObjectURL(url);
+            return images;
+        }
+        
+        function sendShipImages(entityType, images) {
+            if (networkState.socket && networkState.socket.readyState === WebSocket.OPEN) {
+                networkState.socket.send(JSON.stringify({
+                    type: 'SHIP_IMAGES',
+                    entityType: entityType,
+                    images: images
+                }));
+            }
+        }
+        
+        // --- Game Area Resize ---
+        
+        function resizeGameArea(w, h) {
+            const container = document.getElementById('game-container');
+            container.style.width = w + 'px';
+            container.style.height = h + 'px';
+            networkState.gameWidth = w;
+            networkState.gameHeight = h;
+        }
+        
+        // --- Remote Player Management ---
+        
+        function createRemotePlayer() {
+            // Guard: don't create duplicate remote player elements
+            if (networkState.remotePlayerEl) {
+                return;
+            }
+            
+            const el = document.createElement('div');
+            el.className = 'remote-player-wrapper';
+            el.innerHTML = `
+                <canvas class="shield-canvas" width="110" height="110"></canvas>
+                <div class="laser-beam" style="background: linear-gradient(to top, rgba(34,197,94,0) 0%, rgba(34,197,94,1) 20%, rgba(187,247,208,1) 100%); box-shadow: 0 0 15px #22c55e, 0 0 30px #16a34a;"></div>
+                <img src="${networkState.remoteShipImages[0]?.data || ''}" style="width:90px;height:90px;" />
+            `;
+            document.getElementById('game-container').appendChild(el);
+            
+            networkState.remotePlayerEl = el;
+            networkState.remotePlayer = {
+                id: networkState.isHost ? 'player_client' : 'player_host',
+                x: networkState.gameWidth / 2 + 100,
+                y: networkState.gameHeight / 2,
+                rotation: 0,
+                targetRotation: 0,
+                dx: 0,
+                dy: 0,
+                isFiringLaser: false,
+                shieldSectors: {
+                    front: SECTOR_MAX_SHIELD,
+                    starboard: SECTOR_MAX_SHIELD,
+                    aft: SECTOR_MAX_SHIELD,
+                    port: SECTOR_MAX_SHIELD
+                },
+                shieldHits: [],
+                hullHealth: MAX_HULL,
+                alive: true,
+                bounceAngle: 0,
+                bounceTicks: 0
+            };
+        }
+        
+        // --- Network Send Functions ---
+        
+        function sendMovement(dx, dy, angle) {
+            if (!networkState.socket || !networkState.connected) return;
+            networkState.socket.send(JSON.stringify({
+                type: 'MOVE',
+                frame: networkState.frame,
+                player: { dx, dy, angle }
+            }));
+        }
+        
+        function sendFire(weapon, x, y, angle) {
+            if (!networkState.socket || !networkState.connected) return;
+            networkState.socket.send(JSON.stringify({
+                type: 'FIRE',
+                owner: networkState.isHost ? 'player_host' : 'player_client',
+                weapon: weapon,
+                x: x,
+                y: y,
+                angle: angle
+            }));
+        }
+        
+        function sendHostState() {
+            if (!networkState.isHost || !networkState.socket || !networkState.connected) return;
+            
+            const remote = networkState.remotePlayer;
+            const msg = {
+                type: 'MOVE',
+                frame: networkState.frame,
+                host: {
+                    x: gameState.ship.x,
+                    y: gameState.ship.y,
+                    angle: gameState.ship.rotation
+                },
+                client: remote ? {
+                    x: remote.x,
+                    y: remote.y,
+                    angle: remote.rotation
+                } : null,
+                // Client ship state (authoritative from host)
+                clientShip: remote ? {
+                    shieldSectors: remote.shieldSectors,
+                    hullHealth: remote.hullHealth,
+                    alive: remote.alive
+                } : null,
+                enemies: gameState.enemies.map(e => ({
+                    id: e.id,
+                    x: e.x,
+                    y: e.y,
+                    angle: e.rotation,
+                    isFiringLaser: e.isFiringLaser,
+                    shieldSectors: e.shieldSectors,
+                    hullHealth: e.hullHealth
+                })),
+                enemyTorpedoes: networkState.pendingEnemyTorpedoes,
+                effects: networkState.pendingEffects
+            };
+            
+            // Clear pending data after including in message
+            networkState.pendingEnemyTorpedoes = [];
+            networkState.pendingEffects = [];
+            
+            networkState.socket.send(JSON.stringify(msg));
+        }
+        
+        // --- Apply Network State (Client) ---
+        
+        function applyHostMovements(msg) {
+            if (networkState.isHost) return;
+            
+            // Update host player (remote for us) - this we DO need from host
+            if (msg.host && networkState.remotePlayer) {
+                networkState.remotePlayer.x = msg.host.x;
+                networkState.remotePlayer.y = msg.host.y;
+                networkState.remotePlayer.rotation = msg.host.angle;
+            }
+            
+            // CLIENT-SIDE PREDICTION: Client runs its own simulation locally.
+            // We do NOT update our own ship position from host's msg.client.
+            // This gives instant local feedback. The host is authoritative for
+            // collisions/damage, but for movement the client is fully local.
+            
+            // Sync client ship damage state from host (authoritative)
+            if (msg.clientShip) {
+                const oldHull = gameState.ship.hullHealth;
+                const oldShields = { ...gameState.ship.shieldSectors };
+                
+                // Update shield sectors
+                gameState.ship.shieldSectors = msg.clientShip.shieldSectors;
+                gameState.ship.hullHealth = msg.clientShip.hullHealth;
+                
+                // Check for shield damage and show effects
+                ['front', 'starboard', 'aft', 'port'].forEach(sector => {
+                    const oldVal = oldShields[sector];
+                    const newVal = msg.clientShip.shieldSectors[sector];
+                    if (newVal < oldVal) {
+                        // Shield was damaged - add glare effect
+                        const healthPct = newVal / SECTOR_MAX_SHIELD;
+                        const hitColor = getShieldColor(healthPct);
+                        gameState.ship.shieldHits.push({
+                            sector: sector,
+                            angle: 0, // Generic angle
+                            intensity: Math.max(0.3, healthPct + 0.5),
+                            color: hitColor
+                        });
+                    }
+                });
+                
+                // If hull decreased, show damage effect
+                if (msg.clientShip.hullHealth < oldHull) {
+                    createHullHitEffect(gameState.ship.x, gameState.ship.y, Math.random() * Math.PI * 2);
+                }
+                
+                // Check for death
+                if (!msg.clientShip.alive && gameState.ship.alive) {
+                    destroyShip();
+                }
+            }
+            
+            // Update enemies - always sync from host
+            if (msg.enemies) {
+                msg.enemies.forEach(eData => {
+                    const enemy = gameState.enemies.find(e => e.id === eData.id);
+                    if (enemy) {
+                        enemy.x = eData.x;
+                        enemy.y = eData.y;
+                        enemy.rotation = eData.angle;
+                        
+                        // Sync shield and hull state
+                        if (eData.shieldSectors) {
+                            enemy.shieldSectors = eData.shieldSectors;
+                        }
+                        if (eData.hullHealth !== undefined) {
+                            enemy.hullHealth = eData.hullHealth;
+                        }
+                        
+                        // Sync laser firing state
+                        if (eData.isFiringLaser && !enemy.isFiringLaser) {
+                            // Enemy started firing - activate laser visual
+                            enemy.isFiringLaser = true;
+                            if (enemy.laserEl) {
+                                enemy.laserEl.classList.add('enemy-laser-active');
+                            }
+                        } else if (!eData.isFiringLaser && enemy.isFiringLaser) {
+                            // Enemy stopped firing - deactivate laser visual
+                            enemy.isFiringLaser = false;
+                            if (enemy.laserEl) {
+                                enemy.laserEl.classList.remove('enemy-laser-active');
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // Create enemy torpedoes sent from host
+            if (msg.enemyTorpedoes && msg.enemyTorpedoes.length > 0) {
+                msg.enemyTorpedoes.forEach(tData => {
+                    const rad = tData.angle * (Math.PI / 180);
+                    const el = document.createElement('div');
+                    el.className = 'enemy-torpedo';
+                    projectilesContainer.appendChild(el);
+                    gameState.enemyTorpedoes.push({
+                        el: el,
+                        x: tData.x,
+                        y: tData.y,
+                        dx: Math.sin(rad) * TORPEDO_SPEED,
+                        dy: -Math.cos(rad) * TORPEDO_SPEED,
+                        rotation: tData.angle
+                    });
+                });
+            }
+            
+            // Play visual effects sent from host
+            if (msg.effects && msg.effects.length > 0) {
+                msg.effects.forEach(effect => {
+                    switch (effect.type) {
+                        case 'torpedoExplosion':
+                            createTorpedoExplosion(effect.x, effect.y);
+                            break;
+                        case 'torpedoHullExplosion':
+                            createTorpedoHullExplosion(effect.x, effect.y);
+                            break;
+                        case 'explosion':
+                            createExplosion(effect.x, effect.y, effect.hullPercent || 0);
+                            break;
+                        case 'laserSparkler':
+                            createLaserSparkler(effect.x, effect.y, effect.angle);
+                            break;
+                        case 'hullHitEffect':
+                            createHullHitEffect(effect.x, effect.y, effect.angle);
+                            break;
+                    }
+                });
+            }
+        }
+        
+        function handleRemoteSpawn(msg) {
+            // Client receives spawn from host
+            spawnEnemyWithId(msg.id, msg.x, msg.y, msg.angle);
+        }
+        
+        function handleRemoteDelete(msg) {
+            const idx = gameState.enemies.findIndex(e => e.id === msg.id);
+            if (idx >= 0) {
+                const enemy = gameState.enemies[idx];
+                createExplosion(msg.x, msg.y, 0);
+                enemy.el.remove();
+                gameState.enemies.splice(idx, 1);
+            }
+        }
+        
+        function handleRemoteFire(msg) {
+            if (msg.weapon === 'torpedo') {
+                // Create torpedo from remote player
+                createTorpedoAt(msg.x, msg.y, msg.angle, msg.owner.includes('host') ? 'host' : 'client');
+            }
+            // Lasers are instant - just trigger the visual
+        }
+        
+        function sendEnemyFire(enemyId, weapon, x, y, angle) {
+            if (networkState.socket && networkState.socket.readyState === WebSocket.OPEN) {
+                networkState.socket.send(JSON.stringify({
+                    type: 'ENEMY_FIRE',
+                    enemyId: enemyId,
+                    weapon: weapon,
+                    x: x,
+                    y: y,
+                    angle: angle
+                }));
+            }
+        }
+        
+        function handleEnemyFire(msg) {
+            if (msg.weapon === 'torpedo') {
+                // Create enemy torpedo on client
+                const el = document.createElement('div');
+                el.className = 'enemy-torpedo';
+                projectilesContainer.appendChild(el);
+                const rad = msg.angle * (Math.PI / 180);
+                gameState.enemyTorpedoes.push({
+                    el: el,
+                    x: msg.x,
+                    y: msg.y,
+                    dx: Math.sin(rad) * TORPEDO_SPEED,
+                    dy: -Math.cos(rad) * TORPEDO_SPEED,
+                    rotation: msg.angle
+                });
+            } else if (msg.weapon === 'laser') {
+                // Activate enemy laser on client
+                const enemy = gameState.enemies.find(e => e.id === msg.enemyId);
+                if (enemy && enemy.laserEl) {
+                    enemy.isFiringLaser = true;
+                    enemy.laserBurstTimer = ENEMY_LASER_BURST_DURATION;
+                    enemy.laserEl.classList.add('enemy-laser-active');
+                }
+            }
+        }
+        
+        // Client receives damage from host for enemy hits
+        function applyRemoteDamageFromHost(msg) {
+            // Apply damage to local ship (we are the client, so this is our ship)
+            gameState.ship.shieldSectors[msg.sector] = msg.shieldRemaining;
+            gameState.ship.hullHealth = msg.hullRemaining;
+            
+            // Add shield hit visual if shields were hit
+            if (msg.shieldRemaining >= 0) {
+                const healthPct = msg.shieldRemaining / SECTOR_MAX_SHIELD;
+                const hitColor = getShieldColor(healthPct);
+                gameState.ship.shieldHits.push({
+                    sector: msg.sector,
+                    angle: 0, // Generic angle since we don't have exact hit position
+                    intensity: 1,
+                    color: hitColor
+                });
+            }
+            
+            // Create hull hit visual effect
+            if (msg.hullRemaining < gameState.ship.hullHealth) {
+                createHullHitEffect(gameState.ship.x, gameState.ship.y, Math.random() * Math.PI * 2);
+            }
+            
+            // Check for death
+            if (msg.hullRemaining <= 0 && gameState.ship.alive) {
+                destroyShip();
+            }
+        }
+        
+        function applyDamageFromHost(msg) {
+            msg.hits.forEach(hit => {
+                if (hit.target === (networkState.isHost ? 'player_client' : 'player_host')) {
+                    // Damage to our ship
+                    gameState.ship.shieldSectors[hit.sector] = hit.shieldRemaining;
+                    gameState.ship.hullHealth = hit.hullRemaining;
+                    if (hit.shieldDmg > 0) {
+                        gameState.ship.shieldHits.push({
+                            sector: hit.sector,
+                            angle: 0,
+                            intensity: 1,
+                            color: getShieldColor(hit.shieldRemaining / SECTOR_MAX_SHIELD)
+                        });
+                    }
+                } else if (hit.target.startsWith('enemy_')) {
+                    const enemy = gameState.enemies.find(e => e.id === hit.target);
+                    if (enemy) {
+                        enemy.shieldSectors[hit.sector] = hit.shieldRemaining;
+                        enemy.hullHealth = hit.hullRemaining;
+                    }
+                }
+            });
+        }
+        
+        function applyCollisionFromHost(msg) {
+            msg.bounces.forEach(bounce => {
+                if (bounce.id === (networkState.isHost ? 'player_host' : 'player_client')) {
+                    // Our ship bouncing
+                    gameState.ship.bounceAngle = bounce.angle;
+                    gameState.ship.bounceTicks = bounce.ticksRemaining;
+                } else if (bounce.id === (networkState.isHost ? 'player_client' : 'player_host')) {
+                    // Remote player bouncing
+                    if (networkState.remotePlayer) {
+                        networkState.remotePlayer.bounceAngle = bounce.angle;
+                        networkState.remotePlayer.bounceTicks = bounce.ticksRemaining;
+                    }
+                }
+            });
+        }
+        
+        function createTorpedoAt(x, y, angle, owner) {
+            const rad = angle * (Math.PI / 180);
+            const dx = Math.sin(rad) * TORPEDO_SPEED;
+            const dy = -Math.cos(rad) * TORPEDO_SPEED;
+            const el = document.createElement('div');
+            el.className = 'torpedo';
+            projectilesContainer.appendChild(el);
+            gameState.torpedoes.push({
+                el: el, x: x, y: y, dx: dx, dy: dy, rotation: angle, owner: owner
+            });
+        }
+        
+        // --- Start Game Function ---
+        
+        function startGame(isMultiplayer) {
+            networkState.isMultiplayer = isMultiplayer;
+            
+            if (isMultiplayer) {
+                createRemotePlayer();
+            }
+            
+            // Initialize canvases
+            resizeCanvases();
+            
+            // Spawn initial enemies (host only in multiplayer, or always in single player)
+            if (!isMultiplayer || networkState.isHost) {
+                for (let i = 0; i < 4; i++) {
+                    if (isMultiplayer) {
+                        spawnEnemyWithId(`enemy_${networkState.nextEnemyId++}`, null, null, null);
+                    } else {
+                        spawnEnemy();
+                    }
+                }
+            }
+            
+            // Start game loop
+            requestAnimationFrame(update);
+        }
+        
+        function spawnEnemyWithId(id, x, y, angle) {
+            const el = document.createElement('div');
+            el.className = 'enemy-wrapper';
+            el.innerHTML = createEnemyHTML();
+            enemiesContainer.appendChild(el);
+            
+            const laserEl = el.querySelector('.enemy-laser-beam');
+            const shieldCanvasEl = el.querySelector('.shield-canvas');
+            const shieldCtxEl = shieldCanvasEl.getContext('2d');
+
+            // Position
+            if (x === null) {
+                let dist;
+                do {
+                    x = Math.random() * (networkState.gameWidth - 100) + 50;
+                    y = Math.random() * (networkState.gameHeight - 100) + 50;
+                    dist = Math.hypot(x - gameState.ship.x, y - gameState.ship.y);
+                } while (dist < 300);
+                angle = Math.random() * 360;
+            }
+
+            const enemy = {
+                id: id,
+                el: el,
+                laserEl: laserEl,
+                shieldCanvas: shieldCanvasEl,
+                shieldCtx: shieldCtxEl,
+                x: x,
+                y: y,
+                rotation: angle,
+                targetRotation: angle,
+                changeDirTimer: 0,
+                fireTimer: Math.random() * ENEMY_FIRE_RATE,
+                isFiringLaser: false,
+                laserBurstTimer: 0,
+                laserRechargeTimer: 0,
+                laserReady: true,
+                laserHitDealtDamage: false,
+                shieldSectors: {
+                    front: ENEMY_SECTOR_MAX_SHIELD,
+                    starboard: ENEMY_SECTOR_MAX_SHIELD,
+                    aft: ENEMY_SECTOR_MAX_SHIELD,
+                    port: ENEMY_SECTOR_MAX_SHIELD
+                },
+                shieldHits: [],
+                hullHealth: 100
+            };
+            
+            gameState.enemies.push(enemy);
+            
+            // Notify client of spawn
+            if (networkState.isHost && networkState.connected) {
+                networkState.socket.send(JSON.stringify({
+                    type: 'SPAWN',
+                    id: id,
+                    x: x,
+                    y: y,
+                    angle: angle
+                }));
+            }
+            
+            return enemy;
+        }
+
+        // --- Initialization ---
+        
+        function resizeCanvases() {
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            const sf = document.getElementById('starfield');
+            sf.width = w; sf.height = h;
+            initStarfield(sf.getContext('2d'), w, h);
+            effectsCanvas.width = w;
+            effectsCanvas.height = h;
+        }
+        window.addEventListener('resize', resizeCanvases);
+
+        function initStarfield(ctx, w, h) {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, w, h);
+            for(let i=0; i<200; i++) {
+                const x = Math.random() * w;
+                const y = Math.random() * h;
+                const s = Math.random() * 2;
+                ctx.globalAlpha = Math.random();
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(x, y, s, 0, Math.PI*2);
+                ctx.fill();
+            }
+        }
+        
+        function createEnemyHTML() {
+            return `
+            <canvas class="shield-canvas" width="110" height="110"></canvas>
+            <div class="enemy-laser-beam"></div>
+            <svg viewBox="0 0 90 90" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full filter drop-shadow-[0_0_8px_rgba(220,38,38,0.6)]">
+                <circle cx="45" cy="50" r="15" fill="#7f1d1d" opacity="0.8" />
+                <path d="M45 10 L75 70 L45 80 L15 70 Z" fill="#991b1b" stroke="#fca5a5" stroke-width="2"/>
+                <circle cx="45" cy="45" r="6" fill="#fca5a5" />
+                <path d="M15 70 L5 80 L25 75 Z" fill="#450a0a" />
+                <path d="M75 70 L85 80 L65 75 Z" fill="#450a0a" />
+            </svg>`;  
+        }
+
+        function spawnEnemy() {
+            const el = document.createElement('div');
+            el.className = 'enemy-wrapper';
+            el.innerHTML = createEnemyHTML();
+            enemiesContainer.appendChild(el);
+            
+            // Get element references
+            const laserEl = el.querySelector('.enemy-laser-beam');
+            const shieldCanvasEl = el.querySelector('.shield-canvas');
+            const shieldCtxEl = shieldCanvasEl.getContext('2d');
+
+            let x, y, dist;
+            do {
+                x = Math.random() * (window.innerWidth - 100) + 50;
+                y = Math.random() * (window.innerHeight - 100) + 50;
+                dist = Math.hypot(x - gameState.ship.x, y - gameState.ship.y);
+            } while (dist < 300);
+
+            gameState.enemies.push({
+                el: el,
+                laserEl: laserEl,
+                shieldCanvas: shieldCanvasEl,
+                shieldCtx: shieldCtxEl,
+                x: x,
+                y: y,
+                rotation: Math.random() * 360,
+                targetRotation: Math.random() * 360,
+                changeDirTimer: 0,
+                fireTimer: Math.random() * ENEMY_FIRE_RATE,
+                // Laser state (like player)
+                isFiringLaser: false,
+                laserBurstTimer: 0,
+                laserRechargeTimer: 0,
+                laserReady: true,
+                laserHitDealtDamage: false,
+                // Shield state (weaker than player)
+                shieldSectors: {
+                    front: ENEMY_SECTOR_MAX_SHIELD,
+                    starboard: ENEMY_SECTOR_MAX_SHIELD,
+                    aft: ENEMY_SECTOR_MAX_SHIELD,
+                    port: ENEMY_SECTOR_MAX_SHIELD
+                },
+                shieldHits: [], // For glare effects
+                hullHealth: 100 // Hull health for enemies
+            });
+        }
+
+        // Game initialization now happens via startGame() from menu
+        // Do NOT auto-spawn enemies or auto-start here
+
+        // --- Input Handling ---
+        window.addEventListener('keydown', (e) => {
+            if (!gameState.ship.alive) return;
+            if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight', ' '].includes(e.key)) e.preventDefault();
+            gameState.keys.add(e.code);
+            // Forward torpedo (Shift)
+            if (e.key === 'Shift' && !gameState.shiftPressed) {
+                gameState.shiftPressed = true;
+                if (gameState.ship.fwdTorpedoOfflineTimer <= 0) fireForwardTorpedo();
+            }
+            // Aft torpedo (Z)
+            if (e.key === 'z' && !gameState.ctrlPressed) {
+                gameState.ctrlPressed = true;
+                if (gameState.ship.aftTorpedoOfflineTimer <= 0) fireAftTorpedo();
+            }
+            if (e.code === 'Space' && gameState.ship.laserReady && gameState.ship.laserOfflineTimer <= 0) {
+                gameState.ship.isFiringLaser = true;
+                gameState.ship.laserReady = false;
+                gameState.ship.laserBurstTimer = LASER_BURST_DURATION;
+                laserEl.classList.add('laser-active');
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            gameState.keys.delete(e.code);
+            if (e.key === 'Shift') gameState.shiftPressed = false;
+            if (e.key === 'z') gameState.ctrlPressed = false;
+            // Laser is now managed by timer, Space release no longer stops it
+        });
+
+        // --- Compass & Movement Helpers ---
+        const directionAngles = {
+            'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5,
+            'E': 90, 'ESE': 112.5, 'SE': 135, 'SSE': 157.5,
+            'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5,
+            'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5
+        };
+        const arrowMap = {
+            '1,0': 'N', '1,1': 'NE', '0,1': 'E', '-1,1': 'SE',
+            '-1,0': 'S', '-1,-1': 'SW', '0,-1': 'W', '1,-1': 'NW'
+        };
+
+        function rotateTowards(current, target, speed, dt) {
+            current = (current % 360 + 360) % 360;
+            let diff = target - current;
+            if (diff > 180) diff -= 360;
+            if (diff < -180) diff += 360;
+            const maxStep = speed * dt;
+            if (Math.abs(diff) <= maxStep) return target;
+            return current + Math.sign(diff) * maxStep;
+        }
+
+        function moveEntity(entity, speed, dt, bounce) {
+            const rad = entity.rotation * (Math.PI / 180);
+            const dx = Math.sin(rad) * speed * dt;
+            const dy = -Math.cos(rad) * speed * dt;
+            
+            let nextX = entity.x + dx;
+            let nextY = entity.y + dy;
+
+            if (bounce) {
+                if (nextX < SCREEN_PADDING || nextX > window.innerWidth - SCREEN_PADDING) {
+                    entity.targetRotation = (entity.targetRotation + 180) % 360;
+                    nextX = Math.max(SCREEN_PADDING, Math.min(window.innerWidth - SCREEN_PADDING, nextX));
+                }
+                if (nextY < SCREEN_PADDING || nextY > window.innerHeight - SCREEN_PADDING) {
+                    entity.targetRotation = (entity.targetRotation + 180) % 360;
+                    nextY = Math.max(SCREEN_PADDING, Math.min(window.innerHeight - SCREEN_PADDING, nextY));
+                }
+            } else {
+                if (nextX < SCREEN_PADDING) nextX = SCREEN_PADDING;
+                if (nextX > window.innerWidth - SCREEN_PADDING) nextX = window.innerWidth - SCREEN_PADDING;
+                if (nextY < SCREEN_PADDING) nextY = SCREEN_PADDING;
+                if (nextY > window.innerHeight - SCREEN_PADDING) nextY = window.innerHeight - SCREEN_PADDING;
+            }
+            entity.x = nextX;
+            entity.y = nextY;
+        }
+
+        // --- Ring-based Shockwave Explosion ---
+        function createExplosion(x, y, hullPercent = 0) {
+            // Determine color based on hull at destruction
+            let colors;
+            if (hullPercent > 0.5) {
+                colors = ['#38bdf8', '#0ea5e9', '#06b6d4', '#22d3ee']; // Blue/Cyan (high hull)
+            } else if (hullPercent > 0.25) {
+                colors = ['#fbbf24', '#f59e0b', '#f97316', '#facc15']; // Yellow/Orange (mid hull)
+            } else {
+                colors = ['#f97316', '#ef4444', '#dc2626', '#b91c1c']; // Orange/Red (low hull)
+            }
+            
+            // Spawn 8 rings sequentially
+            const ringCount = 8;
+            for (let i = 0; i < ringCount; i++) {
+                const delay = i * (50 + Math.random() * 70); // 50-120ms between rings
+                const startRadius = Math.random() * 5; // 0-5px start
+                const expandMultiplier = 3 + Math.random() * 3; // 3-6x expansion
+                const duration = 300 + Math.random() * 600; // 300-900ms
+                
+                gameState.explosionRings.push({
+                    x: x,
+                    y: y,
+                    startRadius: startRadius,
+                    maxRadius: startRadius + 40 * expandMultiplier, // Smaller max radius
+                    currentRadius: startRadius,
+                    opacity: 1.0,
+                    lineWidth: 5 + Math.random() * 3, // Thinner lines (5-8px)
+                    minLineWidth: 1,
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    delay: delay,
+                    duration: duration,
+                    elapsed: 0,
+                    started: false
+                });
+            }
+        }
+        
+        function updateExplosionRings(dt) {
+            const dtMs = dt * 1000;
+            for (let i = gameState.explosionRings.length - 1; i >= 0; i--) {
+                const ring = gameState.explosionRings[i];
+                
+                // Handle delay before starting
+                if (!ring.started) {
+                    ring.delay -= dtMs;
+                    if (ring.delay <= 0) {
+                        ring.started = true;
+                    }
+                    continue;
+                }
+                
+                ring.elapsed += dtMs;
+                const progress = Math.min(ring.elapsed / ring.duration, 1.0);
+                
+                // Ease-out expansion
+                const easeOut = 1 - Math.pow(1 - progress, 2);
+                ring.currentRadius = ring.startRadius + (ring.maxRadius - ring.startRadius) * easeOut;
+                
+                // Fade out opacity
+                ring.opacity = 1.0 - progress;
+                
+                // Thin out line width
+                ring.currentLineWidth = ring.lineWidth - (ring.lineWidth - ring.minLineWidth) * progress;
+                
+                // Remove when done
+                if (progress >= 1.0) {
+                    gameState.explosionRings.splice(i, 1);
+                }
+            }
+        }
+        
+        function drawExplosionRings() {
+            if (gameState.explosionRings.length === 0) return;
+            
+            // Use additive blend mode for glow effect
+            effectsCtx.globalCompositeOperation = 'lighter';
+            
+            gameState.explosionRings.forEach(ring => {
+                if (!ring.started || ring.opacity <= 0) return;
+                
+                effectsCtx.beginPath();
+                effectsCtx.arc(ring.x, ring.y, ring.currentRadius, 0, Math.PI * 2);
+                effectsCtx.strokeStyle = ring.color;
+                effectsCtx.lineWidth = ring.currentLineWidth;
+                effectsCtx.globalAlpha = ring.opacity * 0.8;
+                
+                // Add glow with shadow
+                effectsCtx.shadowColor = ring.color;
+                effectsCtx.shadowBlur = 15;
+                effectsCtx.stroke();
+                
+                // Second pass for brighter core
+                effectsCtx.globalAlpha = ring.opacity * 0.4;
+                effectsCtx.lineWidth = ring.currentLineWidth * 0.5;
+                effectsCtx.stroke();
+            });
+            
+            // Reset
+            effectsCtx.globalCompositeOperation = 'source-over';
+            effectsCtx.globalAlpha = 1.0;
+            effectsCtx.shadowBlur = 0;
+        }
+        
+        function createShieldShatter(x, y) {
+            // Create ring of shards
+            for(let i=0; i<40; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const r = 50 + Math.random() * 10; // Start roughly at shield radius
+                const px = x + Math.cos(angle) * r;
+                const py = y + Math.sin(angle) * r;
+                
+                // Velocity outward from center
+                const vx = Math.cos(angle);
+                const vy = Math.sin(angle);
+                
+                gameState.particles.push({
+                    x: px, y: py,
+                    dx: vx * (100 + Math.random() * 100), 
+                    dy: vy * (100 + Math.random() * 100),
+                    life: 0.8,
+                    decay: 2.0,
+                    size: Math.random() * 3 + 1,
+                    color: Math.random() > 0.5 ? '#38bdf8' : '#ffffff' // Cyan/White shards
+                });
+            }
+        }
+        
+        // Small explosion when torpedo hits shield
+        function createTorpedoExplosion(x, y) {
+            const colors = ['#fef08a', '#facc15', '#f97316', '#ffffff'];
+            // Small explosion - 12 particles, small size
+            for (let i = 0; i < 12; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 60 + 30;
+                gameState.particles.push({
+                    x: x,
+                    y: y,
+                    dx: Math.cos(angle) * speed,
+                    dy: Math.sin(angle) * speed,
+                    life: 0.4,
+                    decay: 1.5,
+                    size: Math.random() * 2 + 1,
+                    color: colors[Math.floor(Math.random() * colors.length)]
+                });
+            }
+        }
+        
+        // Medium explosion when torpedo hits unshielded hull
+        function createTorpedoHullExplosion(x, y) {
+            const colors = ['#fef08a', '#facc15', '#f97316', '#ea580c', '#dc2626', '#ffffff'];
+            // Bigger explosion - 25 particles, medium size
+            for (let i = 0; i < 25; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 100 + 50;
+                gameState.particles.push({
+                    x: x,
+                    y: y,
+                    dx: Math.cos(angle) * speed,
+                    dy: Math.sin(angle) * speed,
+                    life: 0.6,
+                    decay: 1.2,
+                    size: Math.random() * 3 + 2, // Medium particles (2-5px)
+                    color: colors[Math.floor(Math.random() * colors.length)]
+                });
+            }
+        }
+        
+        // Metal droplet effect when laser hits unshielded hull (PLAYER - blue/white)
+        function createLaserSparkler(x, y, angle) {
+            const colors = ['#ffffff', '#e0f2fe', '#7dd3fc', '#38bdf8', '#0ea5e9', '#0284c7'];
+            // Molten metal droplets spraying out and falling
+            for (let i = 0; i < 30; i++) {
+                const spreadAngle = angle + (Math.random() - 0.5) * Math.PI * 1.2;
+                const speed = Math.random() * 150 + 80;
+                gameState.particles.push({
+                    x: x,
+                    y: y,
+                    dx: Math.cos(spreadAngle) * speed,
+                    dy: Math.sin(spreadAngle) * speed,
+                    life: 0.8 + Math.random() * 0.5,
+                    decay: 1.0,
+                    size: Math.random() * 1.5 + 1.5,
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    hasGravity: true
+                });
+            }
+        }
+        
+        // Metal droplet effect when laser hits unshielded hull (ENEMY - red/orange)
+        function createEnemyHullSparkler(x, y, angle) {
+            const colors = ['#fef08a', '#fbbf24', '#f97316', '#ea580c', '#dc2626', '#b91c1c'];
+            for (let i = 0; i < 30; i++) {
+                const spreadAngle = angle + (Math.random() - 0.5) * Math.PI * 1.2;
+                const speed = Math.random() * 150 + 80;
+                gameState.particles.push({
+                    x: x,
+                    y: y,
+                    dx: Math.cos(spreadAngle) * speed,
+                    dy: Math.sin(spreadAngle) * speed,
+                    life: 0.8 + Math.random() * 0.5,
+                    decay: 1.0,
+                    size: Math.random() * 1.5 + 1.5,
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    hasGravity: true
+                });
+            }
+        }
+
+        function updateParticles(dt) {
+            for (let i = gameState.particles.length - 1; i >= 0; i--) {
+                const p = gameState.particles[i];
+                p.x += p.dx * dt;
+                p.y += p.dy * dt;
+                // Apply gravity if this particle has it
+                if (p.hasGravity) {
+                    p.dy += 400 * dt; // Gravity acceleration
+                }
+                p.life -= p.decay * dt;
+                if (p.life <= 0) {
+                    gameState.particles.splice(i, 1);
+                }
+            }
+        }
+
+        function destroyShip() {
+            gameState.ship.alive = false;
+            gameState.ship.isMoving = false;
+            gameState.ship.isFiringLaser = false;
+            createExplosion(gameState.ship.x, gameState.ship.y, gameState.ship.hullHealth / MAX_HULL);
+            shipEl.classList.add('spaceship-dead');
+            laserEl.classList.remove('laser-active');
+            
+            // Notify remote player of death in multiplayer
+            if (networkState.isMultiplayer && networkState.connected) {
+                sendDeath();
+            }
+            
+            // Delay game over screen to allow explosion to be seen
+            setTimeout(() => {
+                gameOverEl.style.display = 'flex';
+            }, 1500);
+        }
+        
+        function sendDeath() {
+            if (networkState.socket && networkState.socket.readyState === WebSocket.OPEN) {
+                networkState.socket.send(JSON.stringify({
+                    type: 'DEATH',
+                    x: gameState.ship.x,
+                    y: gameState.ship.y
+                }));
+            }
+        }
+        
+        function handleRemoteDeath(msg) {
+            if (networkState.remotePlayer) {
+                networkState.remotePlayer.alive = false;
+                createExplosion(msg.x, msg.y, 0);
+                
+                // Hide remote player element
+                if (networkState.remotePlayerEl) {
+                    networkState.remotePlayerEl.classList.add('spaceship-dead');
+                }
+                
+                // If local player is also dead, show game over
+                if (!gameState.ship.alive) {
+                    gameOverEl.style.display = 'flex';
+                }
+            }
+        }
+
+        // --- Main Game Loop ---
+        function update(timestamp) {
+            if (!gameState.lastTime) gameState.lastTime = timestamp;
+            const dt = (timestamp - gameState.lastTime) / 1000;
+            gameState.lastTime = timestamp;
+
+            if (gameState.ship.alive) {
+                processInput();
+                updateShip(dt);
+                updateLaser(dt);
+                updateWeaponTimers(dt);
+            }
+            
+            // Enemy AI runs when any player is alive (in multiplayer, check both players)
+            const anyPlayerAlive = gameState.ship.alive || 
+                (networkState.isMultiplayer && networkState.remotePlayer && networkState.remotePlayer.alive);
+            
+            if (anyPlayerAlive && (!networkState.isMultiplayer || networkState.isHost)) {
+                updateEnemies(dt, timestamp);
+            }
+            
+            // Update remote player (multiplayer)
+            if (networkState.isMultiplayer && networkState.remotePlayer) {
+                updateRemotePlayer(dt);
+            }
+            
+            updateTorpedoes(dt);
+            updateParticles(dt);
+            updateExplosionRings(dt);
+            
+            // Only host calculates collisions in multiplayer
+            if (!networkState.isMultiplayer || networkState.isHost) {
+                checkCollisions(timestamp);
+            }
+            
+            if (gameState.ship.alive) {
+                updateShields(dt);
+            }
+            updateEnemyShields(dt);
+            
+            // Network sync (host broadcasts state at 30 Hz)
+            if (networkState.isMultiplayer && networkState.isHost && networkState.connected) {
+                networkState.frame++;
+                if (timestamp - networkState.lastNetworkTick >= NETWORK_TICK_MS) {
+                    sendHostState();
+                    networkState.lastNetworkTick = timestamp;
+                }
+            }
+            
+            render(timestamp);
+
+            requestAnimationFrame(update);
+        }
+        
+        function updateRemotePlayer(dt) {
+            const remote = networkState.remotePlayer;
+            if (!remote || !remote.alive) return;
+            
+            // Handle bounce
+            if (remote.bounceTicks > 0) {
+                const bounceRad = remote.bounceAngle * (Math.PI / 180);
+                remote.x += Math.sin(bounceRad) * BOUNCE_SPEED;
+                remote.y -= Math.cos(bounceRad) * BOUNCE_SPEED;
+                remote.bounceTicks--;
+            } else if (networkState.isHost) {
+                // Host processes remote player movement from client input
+                remote.x += (remote.dx || 0) * dt;
+                remote.y += (remote.dy || 0) * dt;
+                // Use rotation directly from client - don't double-interpolate
+                remote.rotation = remote.targetRotation;
+                
+                // Clamp to game bounds
+                remote.x = Math.max(SCREEN_PADDING, Math.min(networkState.gameWidth - SCREEN_PADDING, remote.x));
+                remote.y = Math.max(SCREEN_PADDING, Math.min(networkState.gameHeight - SCREEN_PADDING, remote.y));
+            }
+            
+            // Update shield hit effects
+            remote.shieldHits.forEach(hit => {
+                hit.intensity -= dt * SHIELD_DECAY;
+            });
+            remote.shieldHits = remote.shieldHits.filter(h => h.intensity > 0);
+        }
+
+        function processInput() {
+            let direction = "None";
+            let source = "Holding Position";
+            const k = gameState.keys;
+            const isPressed = (code) => k.has(code);
+
+            const numpadKeys = ['Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Numpad6', 'Numpad7', 'Numpad8', 'Numpad9'];
+            if (numpadKeys.some(key => k.has(key))) {
+                source = "Numpad Control";
+                if (isPressed('Numpad8') && isPressed('Numpad9')) direction = 'NNE';
+                else if (isPressed('Numpad7') && isPressed('Numpad8')) direction = 'NNW';
+                else if (isPressed('Numpad8')) direction = 'N';
+                else if (isPressed('Numpad9') && isPressed('Numpad6')) direction = 'ENE';
+                else if (isPressed('Numpad6') && isPressed('Numpad3')) direction = 'ESE';
+                else if (isPressed('Numpad9')) direction = 'NE'; 
+                else if (isPressed('Numpad6')) direction = 'E';
+                else if (isPressed('Numpad3') && isPressed('Numpad2')) direction = 'SSE';
+                else if (isPressed('Numpad1') && isPressed('Numpad2')) direction = 'SSW';
+                else if (isPressed('Numpad3')) direction = 'SE'; 
+                else if (isPressed('Numpad2')) direction = 'S';
+                else if (isPressed('Numpad1') && isPressed('Numpad4')) direction = 'WSW';
+                else if (isPressed('Numpad4') && isPressed('Numpad7')) direction = 'WNW';
+                else if (isPressed('Numpad7')) direction = 'NW'; 
+                else if (isPressed('Numpad1')) direction = 'SW'; 
+                else if (isPressed('Numpad4')) direction = 'W';
+            } else {
+                let v = 0, h = 0;
+                if (isPressed('ArrowUp')) v += 1;
+                if (isPressed('ArrowDown')) v -= 1;
+                if (isPressed('ArrowRight')) h += 1;
+                if (isPressed('ArrowLeft')) h -= 1;
+                if (v !== 0 || h !== 0) {
+                    source = "Arrow Control";
+                    const key = `${v},${h}`;
+                    if (arrowMap[key]) direction = arrowMap[key];
+                }
+            }
+
+            if (direction !== "None") {
+                gameState.ship.targetRotation = directionAngles[direction];
+                gameState.ship.isMoving = true;
+            }
+        }
+
+        function updateShip(dt) {
+            const ship = gameState.ship;
+            ship.rotation = rotateTowards(ship.rotation, ship.targetRotation, ROTATION_SPEED, dt);
+            // Speed halved if damaged on port/starboard
+            const currentSpeed = ship.speedReduced ? MOVE_SPEED * 0.5 : MOVE_SPEED;
+            if (ship.isMoving) moveEntity(ship, currentSpeed, dt, false);
+            
+            // Client sends movement to host
+            if (networkState.isMultiplayer && !networkState.isHost && networkState.connected) {
+                const rad = ship.rotation * (Math.PI / 180);
+                const dx = ship.isMoving ? Math.sin(rad) * currentSpeed : 0;
+                const dy = ship.isMoving ? -Math.cos(rad) * currentSpeed : 0;
+                sendMovement(dx, dy, ship.rotation);
+            }
+        }
+
+        function updateLaser(dt) {
+            const ship = gameState.ship;
+            
+            // Handle burst timer - laser is actively firing
+            if (ship.isFiringLaser) {
+                ship.laserBurstTimer -= dt;
+                if (ship.laserBurstTimer <= 0) {
+                    // Burst ended, start recharge
+                    ship.isFiringLaser = false;
+                    ship.laserRechargeTimer = LASER_RECHARGE_TIME;
+                    laserEl.classList.remove('laser-active');
+                }
+            }
+            
+            // Handle recharge timer - laser is recharging
+            if (!ship.laserReady && !ship.isFiringLaser) {
+                ship.laserRechargeTimer -= dt;
+                if (ship.laserRechargeTimer <= 0) {
+                    ship.laserReady = true;
+                    ship.laserRechargeTimer = 0;
+                }
+            }
+        }
+
+        function updateWeaponTimers(dt) {
+            const ship = gameState.ship;
+            // Count down weapon offline timers
+            if (ship.laserOfflineTimer > 0) {
+                ship.laserOfflineTimer = Math.max(0, ship.laserOfflineTimer - dt);
+            }
+            if (ship.fwdTorpedoOfflineTimer > 0) {
+                ship.fwdTorpedoOfflineTimer = Math.max(0, ship.fwdTorpedoOfflineTimer - dt);
+            }
+            if (ship.aftTorpedoOfflineTimer > 0) {
+                ship.aftTorpedoOfflineTimer = Math.max(0, ship.aftTorpedoOfflineTimer - dt);
+            }
+            // Count down targeting accuracy timers
+            if (ship.fwdTargetingTimer > 0) {
+                ship.fwdTargetingTimer = Math.max(0, ship.fwdTargetingTimer - dt);
+            }
+            if (ship.aftTargetingTimer > 0) {
+                ship.aftTargetingTimer = Math.max(0, ship.aftTargetingTimer - dt);
+            }
+            
+            // Torpedo recharge - regenerate one torpedo every 5 seconds
+            // Only recharge when not offline
+            if (ship.fwdTorpedoOfflineTimer <= 0 && ship.forwardTorpedoes < MAX_FORWARD_TORPEDOES) {
+                ship.fwdRechargeTimer += dt;
+                if (ship.fwdRechargeTimer >= TORPEDO_RECHARGE_TIME) {
+                    ship.forwardTorpedoes++;
+                    ship.fwdRechargeTimer = 0;
+                }
+            }
+            if (ship.aftTorpedoOfflineTimer <= 0 && ship.aftTorpedoes < MAX_AFT_TORPEDOES) {
+                ship.aftRechargeTimer += dt;
+                if (ship.aftRechargeTimer >= TORPEDO_RECHARGE_TIME) {
+                    ship.aftTorpedoes++;
+                    ship.aftRechargeTimer = 0;
+                }
+            }
+        }
+
+        function updateEnemies(dt, now) {
+            const ship = gameState.ship;
+            const remote = networkState.remotePlayer;
+            
+            gameState.enemies.forEach(enemy => {
+                // In multiplayer, target the closest player
+                let targetX = ship.x;
+                let targetY = ship.y;
+                let targetAlive = ship.alive;
+                
+                if (networkState.isMultiplayer && remote && remote.alive) {
+                    const distToLocal = Math.hypot(ship.x - enemy.x, ship.y - enemy.y);
+                    const distToRemote = Math.hypot(remote.x - enemy.x, remote.y - enemy.y);
+                    
+                    if (distToRemote < distToLocal || !ship.alive) {
+                        targetX = remote.x;
+                        targetY = remote.y;
+                        targetAlive = remote.alive;
+                    }
+                }
+                
+                const dx = targetX - enemy.x;
+                const dy = targetY - enemy.y;
+                const dist = Math.hypot(dx, dy);
+                
+                let desiredAngle;
+                if (dist < 600 && targetAlive) {
+                    desiredAngle = (Math.atan2(dy, dx) * 180 / Math.PI) + 90;
+                } else {
+                    enemy.changeDirTimer -= dt;
+                    if (enemy.changeDirTimer <= 0) {
+                        enemy.wanderingAngle = Math.random() * 360;
+                        enemy.changeDirTimer = 2 + Math.random() * 2;
+                    }
+                    desiredAngle = enemy.wanderingAngle || 0;
+                }
+
+                enemy.targetRotation = desiredAngle;
+                enemy.rotation = rotateTowards(enemy.rotation, enemy.targetRotation, ENEMY_ROT_SPEED, dt);
+                moveEntity(enemy, ENEMY_SPEED, dt, true);
+
+                // Torpedo firing
+                if (now > enemy.fireTimer && dist < 700 && targetAlive) {
+                    fireEnemyTorpedo(enemy);
+                    enemy.fireTimer = now + ENEMY_FIRE_RATE + (Math.random() * 500);
+                }
+                
+                // Enemy Laser Logic (burst + cooldown)
+                if (enemy.isFiringLaser) {
+                    enemy.laserBurstTimer -= dt;
+                    if (enemy.laserBurstTimer <= 0) {
+                        enemy.isFiringLaser = false;
+                        enemy.laserRechargeTimer = ENEMY_LASER_RECHARGE_TIME;
+                        enemy.laserEl.classList.remove('enemy-laser-active');
+                        enemy.laserHitDealtDamage = false;
+                    }
+                }
+                
+                if (!enemy.laserReady && !enemy.isFiringLaser) {
+                    enemy.laserRechargeTimer -= dt;
+                    if (enemy.laserRechargeTimer <= 0) {
+                        enemy.laserReady = true;
+                        enemy.laserRechargeTimer = 0;
+                    }
+                }
+                
+                // Fire laser when ready and in range
+                if (enemy.laserReady && dist < 500 && targetAlive) {
+                    enemy.isFiringLaser = true;
+                    enemy.laserReady = false;
+                    enemy.laserBurstTimer = ENEMY_LASER_BURST_DURATION;
+                    enemy.laserEl.classList.add('enemy-laser-active');
+                    
+                    // Sync to client in multiplayer
+                    if (networkState.isMultiplayer && networkState.isHost && networkState.connected) {
+                        sendEnemyFire(enemy.id, 'laser', enemy.x, enemy.y, enemy.rotation);
+                    }
+                }
+            });
+        }
+
+        function fireEnemyTorpedo(enemy) {
+            const rad = enemy.rotation * (Math.PI / 180);
+            const dx = Math.sin(rad) * TORPEDO_SPEED;
+            const dy = -Math.cos(rad) * TORPEDO_SPEED;
+            const el = document.createElement('div');
+            el.className = 'enemy-torpedo';
+            projectilesContainer.appendChild(el);
+            gameState.enemyTorpedoes.push({
+                el: el, x: enemy.x, y: enemy.y, dx: dx, dy: dy, rotation: enemy.rotation
+            });
+            
+            // Queue torpedo for sync to client in multiplayer (will be sent in next MOVE message)
+            if (networkState.isMultiplayer && networkState.isHost) {
+                networkState.pendingEnemyTorpedoes.push({
+                    x: enemy.x,
+                    y: enemy.y,
+                    angle: enemy.rotation
+                });
+            }
+        }
+
+        function fireForwardTorpedo() {
+            if (gameState.ship.forwardTorpedoes <= 0) return;
+            gameState.ship.forwardTorpedoes--;
+            
+            // Apply targeting inaccuracy if damaged (±20 degrees)
+            let rotation = gameState.ship.rotation;
+            if (gameState.ship.fwdTargetingTimer > 0) {
+                rotation += (Math.random() - 0.5) * 40; // ±20 degrees
+            }
+            
+            const rad = rotation * (Math.PI / 180);
+            const dx = Math.sin(rad) * TORPEDO_SPEED;
+            const dy = -Math.cos(rad) * TORPEDO_SPEED;
+            const el = document.createElement('div');
+            el.className = 'torpedo';
+            projectilesContainer.appendChild(el);
+            gameState.torpedoes.push({
+                el: el, x: gameState.ship.x, y: gameState.ship.y, dx: dx, dy: dy, rotation: rotation
+            });
+            
+            // Network notification
+            if (networkState.isMultiplayer && networkState.connected) {
+                sendFire('torpedo', gameState.ship.x, gameState.ship.y, rotation);
+            }
+        }
+
+        function fireAftTorpedo() {
+            if (gameState.ship.aftTorpedoes <= 0) return;
+            gameState.ship.aftTorpedoes--;
+            
+            // Fire in opposite direction (add 180 degrees)
+            let aftRotation = (gameState.ship.rotation + 180) % 360;
+            
+            // Apply targeting inaccuracy if damaged (±20 degrees)
+            if (gameState.ship.aftTargetingTimer > 0) {
+                aftRotation += (Math.random() - 0.5) * 40; // ±20 degrees
+            }
+            
+            const rad = aftRotation * (Math.PI / 180);
+            const dx = Math.sin(rad) * TORPEDO_SPEED;
+            const dy = -Math.cos(rad) * TORPEDO_SPEED;
+            const el = document.createElement('div');
+            el.className = 'torpedo';
+            projectilesContainer.appendChild(el);
+            gameState.torpedoes.push({
+                el: el, x: gameState.ship.x, y: gameState.ship.y, dx: dx, dy: dy, rotation: aftRotation
+            });
+            
+            // Network notification
+            if (networkState.isMultiplayer && networkState.connected) {
+                sendFire('torpedo', gameState.ship.x, gameState.ship.y, aftRotation);
+            }
+        }
+
+        function updateTorpedoes(dt) {
+            const process = (list) => {
+                for (let i = list.length - 1; i >= 0; i--) {
+                    const t = list[i];
+                    t.x += t.dx * dt;
+                    t.y += t.dy * dt;
+                    if (isOutOfBounds(t.x, t.y)) {
+                        t.el.remove();
+                        list.splice(i, 1);
+                    }
+                }
+            };
+            process(gameState.torpedoes);
+            process(gameState.enemyTorpedoes);
+        }
+        
+        function isOutOfBounds(x, y) {
+            return (x < -50 || x > window.innerWidth + 50 || y < -50 || y > window.innerHeight + 50);
+        }
+
+        function checkCollisions(now) {
+            // 1. Player Torpedoes vs Enemies (with shield)
+            for (let tIndex = gameState.torpedoes.length - 1; tIndex >= 0; tIndex--) {
+                const torpedo = gameState.torpedoes[tIndex];
+                for (let eIndex = gameState.enemies.length - 1; eIndex >= 0; eIndex--) {
+                    const enemy = gameState.enemies[eIndex];
+                    if (Math.hypot(torpedo.x - enemy.x, torpedo.y - enemy.y) < 40) {
+                        // Calculate hit angle relative to enemy
+                        const hitAngle = Math.atan2(torpedo.y - enemy.y, torpedo.x - enemy.x);
+                        const enemyRad = (enemy.rotation - 90) * (Math.PI/180);
+                        const localAngle = hitAngle - enemyRad;
+                        
+                        // Determine which sector was hit
+                        const sector = getSectorFromAngle(localAngle);
+                        const sectorHealth = enemy.shieldSectors[sector];
+                        
+                        // Calculate base damage (1/8 to 1/4)
+                        const baseDamage = 0.125 + Math.random() * 0.125;
+                        
+                        if (sectorHealth > 0) {
+                            // Shield absorbs hit
+                            const shieldDamage = SECTOR_MAX_SHIELD * baseDamage;
+                            const newShieldHealth = Math.max(0, sectorHealth - shieldDamage);
+                            enemy.shieldSectors[sector] = newShieldHealth;
+                            
+                            // Small torpedo explosion at hit point
+                            createTorpedoExplosion(torpedo.x, torpedo.y);
+                            
+                            // Shield glare effect
+                            const healthPct = newShieldHealth / SECTOR_MAX_SHIELD;
+                            const hitColor = getShieldColor(healthPct);
+                            enemy.shieldHits.push({
+                                sector: sector,
+                                angle: localAngle,
+                                intensity: Math.max(0.3, healthPct + 0.3),
+                                color: hitColor
+                            });
+                        } else {
+                            // Shield depleted - damage enemy hull
+                            createTorpedoHullExplosion(torpedo.x, torpedo.y);
+                            const hullDamage = 100 * baseDamage;
+                            enemy.hullHealth -= hullDamage;
+                            
+                            // Destroy if hull depleted
+                            if (enemy.hullHealth <= 0) {
+                                enemy.el.remove();
+                                gameState.enemies.splice(eIndex, 1);
+                                createExplosion(enemy.x, enemy.y, 0); // Low hull = red/orange
+                            }
+                        }
+                        
+                        torpedo.el.remove();
+                        gameState.torpedoes.splice(tIndex, 1);
+                        break;
+                    }
+                }
+            }
+
+            // 2. Player Laser vs Enemies (with shield)
+            if (gameState.ship.isFiringLaser && gameState.ship.alive) {
+                const shipRad = gameState.ship.rotation * (Math.PI / 180);
+                const sX = gameState.ship.x;
+                const sY = gameState.ship.y;
+                const eX = sX + Math.sin(shipRad) * LASER_LENGTH;
+                const eY = sY - Math.cos(shipRad) * LASER_LENGTH;
+                
+                // Find the closest enemy hit to determine laser length
+                let closestHitDistance = LASER_LENGTH;
+                let hitEnemy = null;
+
+                for (let eIndex = gameState.enemies.length - 1; eIndex >= 0; eIndex--) {
+                    const enemy = gameState.enemies[eIndex];
+                    if (pointToLineDistance(enemy.x, enemy.y, sX, sY, eX, eY) < 40) {
+                        // Calculate distance to this enemy
+                        const distToEnemy = Math.hypot(enemy.x - sX, enemy.y - sY);
+                        
+                        // Check if this enemy has active shields
+                        const angleFromPlayerToEnemy = Math.atan2(gameState.ship.y - enemy.y, gameState.ship.x - enemy.x);
+                        const enemyRad = (enemy.rotation - 90) * (Math.PI/180);
+                        const localAngle = angleFromPlayerToEnemy - enemyRad;
+                        const sector = getSectorFromAngle(localAngle);
+                        const sectorHealth = enemy.shieldSectors[sector];
+                        
+                        if (sectorHealth > 0) {
+                            // Shield active - laser stops here
+                            const hitDist = Math.max(0, distToEnemy - SHIP_RADIUS + 10);
+                            if (hitDist < closestHitDistance) {
+                                closestHitDistance = hitDist;
+                                hitEnemy = enemy;
+                            }
+                        } else {
+                            // No shield - laser still stops at enemy hull
+                            const hitDist = Math.max(0, distToEnemy - SHIP_RADIUS + 10);
+                            if (hitDist < closestHitDistance) {
+                                closestHitDistance = hitDist;
+                            }
+                        }
+                        
+                        // Only deal damage once per burst (track on enemy)
+                        if (!enemy.laserHitByPlayer) {
+                            enemy.laserHitByPlayer = true;
+                            
+                            // Calculate base damage (1/8 to 1/4)
+                            const baseDamage = 0.125 + Math.random() * 0.125;
+                            
+                            if (sectorHealth > 0) {
+                                // Shield absorbs hit
+                                const shieldDamage = SECTOR_MAX_SHIELD * baseDamage;
+                                const newShieldHealth = Math.max(0, sectorHealth - shieldDamage);
+                                enemy.shieldSectors[sector] = newShieldHealth;
+                                
+                                // Shield glare effect
+                                const healthPct = newShieldHealth / SECTOR_MAX_SHIELD;
+                                const hitColor = getShieldColor(healthPct);
+                                enemy.shieldHits.push({
+                                    sector: sector,
+                                    angle: localAngle,
+                                    intensity: Math.max(0.3, healthPct + 0.3),
+                                    color: hitColor
+                                });
+                            } else {
+                                // Shield depleted - hit enemy hull with red/orange sparkler
+                                const sparkAngle = Math.atan2(enemy.y - gameState.ship.y, enemy.x - gameState.ship.x);
+                                createEnemyHullSparkler(enemy.x, enemy.y, sparkAngle);
+                                
+                                // Damage hull (1/8 to 1/4 of max hull)
+                                const hullDamage = 100 * baseDamage;
+                                enemy.hullHealth -= hullDamage;
+                                
+                                // Destroy if hull depleted
+                                if (enemy.hullHealth <= 0) {
+                                    enemy.el.remove();
+                                    gameState.enemies.splice(eIndex, 1);
+                                    createExplosion(enemy.x, enemy.y, 0); // Low hull = red/orange
+                                }
+                            }
+                        }
+                    } else {
+                        // Reset laser hit flag when not being hit
+                        enemy.laserHitByPlayer = false;
+                    }
+                }
+                
+                // Store laser hit distance for rendering
+                gameState.ship.laserHitDistance = closestHitDistance;
+            } else {
+                // Reset all laser hit flags when player not firing
+                gameState.enemies.forEach(e => e.laserHitByPlayer = false);
+                gameState.ship.laserHitDistance = LASER_LENGTH;
+            }
+            
+            // 3. Enemy Lasers vs Player
+            if (gameState.ship.alive) {
+                for (let eIndex = gameState.enemies.length - 1; eIndex >= 0; eIndex--) {
+                    const enemy = gameState.enemies[eIndex];
+                    if (enemy.isFiringLaser) {
+                        const enemyRad = enemy.rotation * (Math.PI / 180);
+                        const sX = enemy.x;
+                        const sY = enemy.y;
+                        const eX = sX + Math.sin(enemyRad) * LASER_LENGTH;
+                        const eY = sY - Math.cos(enemyRad) * LASER_LENGTH;
+                        
+                        // Calculate distance to player
+                        const distToPlayer = Math.hypot(gameState.ship.x - enemy.x, gameState.ship.y - enemy.y);
+                        
+                        // Check if player is hit by enemy laser
+                        if (pointToLineDistance(gameState.ship.x, gameState.ship.y, sX, sY, eX, eY) < 40) {
+                            // Calculate hit angle: direction FROM enemy TO player, relative to ship's facing
+                            // We want the glare to appear where the laser hits (the side facing the enemy)
+                            const angleFromEnemyToPlayer = Math.atan2(enemy.y - gameState.ship.y, enemy.x - gameState.ship.x);
+                            const shipRad = (gameState.ship.rotation - 90) * (Math.PI/180);
+                            const localAngle = angleFromEnemyToPlayer - shipRad;
+                            
+                            // Determine which sector was hit
+                            const sector = getSectorFromAngle(localAngle);
+                            const sectorHealth = gameState.ship.shieldSectors[sector];
+                            
+                            // Set laser length to stop at player's shield
+                            if (sectorHealth > 0) {
+                                enemy.laserHitDistance = Math.max(0, distToPlayer - SHIP_RADIUS + 10);
+                            } else {
+                                enemy.laserHitDistance = LASER_LENGTH;
+                            }
+                            
+                            // Only deal damage ONCE per laser burst (same as torpedo)
+                            if (!enemy.laserHitDealtDamage) {
+                                enemy.laserHitDealtDamage = true;
+                                
+                                // Calculate base damage (1/8 to 1/4) - same as torpedo
+                                const baseDamage = 0.125 + Math.random() * 0.125;
+                                
+                                if (sectorHealth > 0) {
+                                    // Shield absorbs hit
+                                    const shieldDamage = SECTOR_MAX_SHIELD * baseDamage;
+                                    const newShieldHealth = Math.max(0, sectorHealth - shieldDamage);
+                                    gameState.ship.shieldSectors[sector] = newShieldHealth;
+                                    
+                                    // Check for shield breach - overflow damages hull
+                                    if (newShieldHealth <= 0 && sectorHealth > 0) {
+                                        const overflowDamage = shieldDamage - sectorHealth;
+                                        applyHullDamage(overflowDamage, sector, localAngle);
+                                    }
+                                    
+                                    // Shield glare effect
+                                    const healthPct = newShieldHealth / SECTOR_MAX_SHIELD;
+                                    const hitColor = getShieldColor(healthPct);
+                                    gameState.ship.shieldHits.push({
+                                        sector: sector,
+                                        angle: localAngle,
+                                        intensity: Math.max(0.3, healthPct + 0.3),
+                                        color: hitColor
+                                    });
+                                } else {
+                                    // Shield depleted - direct hull hit with sparkler effect
+                                    // Calculate hit point at edge of player ship
+                                    const sparkAngle = Math.atan2(enemy.y - gameState.ship.y, enemy.x - gameState.ship.x);
+                                    const hitX = gameState.ship.x + Math.cos(sparkAngle) * (SHIP_RADIUS - 10);
+                                    const hitY = gameState.ship.y + Math.sin(sparkAngle) * (SHIP_RADIUS - 10);
+                                    createLaserSparkler(hitX, hitY, sparkAngle + Math.PI);
+                                    
+                                    const hullDamage = MAX_HULL * baseDamage;
+                                    applyHullDamage(hullDamage, sector, localAngle);
+                                }
+                            }
+                        } else {
+                            // Not hitting player - full laser length
+                            enemy.laserHitDistance = LASER_LENGTH;
+                        }
+                    }
+                }
+            }
+
+            // 4. Enemy Torpedoes vs Player
+            if (gameState.ship.alive) {
+                for (let tIndex = gameState.enemyTorpedoes.length - 1; tIndex >= 0; tIndex--) {
+                    const torpedo = gameState.enemyTorpedoes[tIndex];
+                    const dist = Math.hypot(torpedo.x - gameState.ship.x, torpedo.y - gameState.ship.y);
+                    
+                    if (dist < SHIP_RADIUS) {
+                        // Calculate hit angle relative to ship
+                        const hitAngle = Math.atan2(torpedo.y - gameState.ship.y, torpedo.x - gameState.ship.x);
+                        const shipRad = (gameState.ship.rotation - 90) * (Math.PI/180);
+                        const localAngle = hitAngle - shipRad;
+                        
+                        // Determine which sector was hit
+                        const sector = getSectorFromAngle(localAngle);
+                        const sectorHealth = gameState.ship.shieldSectors[sector];
+                        
+                        // Calculate base damage (1/8 to 1/4)
+                        const baseDamage = 0.125 + Math.random() * 0.125;
+                        
+                        if (sectorHealth > 0) {
+                            // Shield absorbs hit
+                            const shieldDamage = SECTOR_MAX_SHIELD * baseDamage;
+                            const newShieldHealth = Math.max(0, sectorHealth - shieldDamage);
+                            gameState.ship.shieldSectors[sector] = newShieldHealth;
+                            
+                            // Small torpedo explosion at hit point
+                            createTorpedoExplosion(torpedo.x, torpedo.y);
+                            
+                            // Check for shield breach - overflow damages hull
+                            if (newShieldHealth <= 0 && sectorHealth > 0) {
+                                const overflowDamage = shieldDamage - sectorHealth;
+                                applyHullDamage(overflowDamage, sector, localAngle);
+                            }
+                            
+                            // Shield glare effect
+                            const healthPct = newShieldHealth / SECTOR_MAX_SHIELD;
+                            const hitColor = getShieldColor(healthPct);
+                            gameState.ship.shieldHits.push({
+                                sector: sector,
+                                angle: localAngle,
+                                intensity: Math.max(0.3, healthPct + 0.3),
+                                color: hitColor
+                            });
+                        } else {
+                            // Shield depleted - direct hull hit with explosion
+                            createTorpedoHullExplosion(torpedo.x, torpedo.y);
+                            const hullDamage = MAX_HULL * baseDamage;
+                            applyHullDamage(hullDamage, sector, localAngle);
+                        }
+
+                        torpedo.el.remove();
+                        gameState.enemyTorpedoes.splice(tIndex, 1);
+                    }
+                }
+            }
+            
+            // 5. Enemy Torpedoes vs Remote Player (multiplayer host only)
+            if (networkState.isMultiplayer && networkState.isHost && networkState.remotePlayer && networkState.remotePlayer.alive) {
+                const remote = networkState.remotePlayer;
+                for (let tIndex = gameState.enemyTorpedoes.length - 1; tIndex >= 0; tIndex--) {
+                    const torpedo = gameState.enemyTorpedoes[tIndex];
+                    const dist = Math.hypot(torpedo.x - remote.x, torpedo.y - remote.y);
+                    
+                    if (dist < SHIP_RADIUS) {
+                        // Calculate hit angle relative to remote ship
+                        const hitAngle = Math.atan2(torpedo.y - remote.y, torpedo.x - remote.x);
+                        const shipRad = (remote.rotation - 90) * (Math.PI/180);
+                        const localAngle = hitAngle - shipRad;
+                        
+                        // Determine which sector was hit
+                        const sector = getSectorFromAngle(localAngle);
+                        const sectorHealth = remote.shieldSectors[sector];
+                        
+                        // Calculate base damage (1/8 to 1/4)
+                        const baseDamage = 0.125 + Math.random() * 0.125;
+                        
+                        if (sectorHealth > 0) {
+                            // Shield absorbs hit
+                            const shieldDamage = SECTOR_MAX_SHIELD * baseDamage;
+                            const newShieldHealth = Math.max(0, sectorHealth - shieldDamage);
+                            remote.shieldSectors[sector] = newShieldHealth;
+                            
+                            // Small torpedo explosion at hit point
+                            createTorpedoExplosion(torpedo.x, torpedo.y);
+                            networkState.pendingEffects.push({ type: 'torpedoExplosion', x: torpedo.x, y: torpedo.y });
+                            
+                            // Check for shield breach - overflow damages hull
+                            if (newShieldHealth <= 0 && sectorHealth > 0) {
+                                const overflowDamage = shieldDamage - sectorHealth;
+                                applyRemoteHullDamage(overflowDamage, sector, localAngle);
+                            }
+                            
+                            // Shield glare effect on remote
+                            const healthPct = newShieldHealth / SECTOR_MAX_SHIELD;
+                            const hitColor = getShieldColor(healthPct);
+                            remote.shieldHits.push({
+                                sector: sector,
+                                angle: localAngle,
+                                intensity: Math.max(0.3, healthPct + 0.3),
+                                color: hitColor
+                            });
+                        } else {
+                            // Shield depleted - direct hull hit
+                            createTorpedoHullExplosion(torpedo.x, torpedo.y);
+                            networkState.pendingEffects.push({ type: 'torpedoHullExplosion', x: torpedo.x, y: torpedo.y });
+                            const hullDamage = MAX_HULL * baseDamage;
+                            applyRemoteHullDamage(hullDamage, sector, localAngle);
+                        }
+                        
+                        torpedo.el.remove();
+                        gameState.enemyTorpedoes.splice(tIndex, 1);
+                    }
+                }
+            }
+            
+            // 6. Enemy Lasers vs Remote Player (multiplayer host only)
+            if (networkState.isMultiplayer && networkState.isHost && networkState.remotePlayer && networkState.remotePlayer.alive) {
+                const remote = networkState.remotePlayer;
+                for (let eIndex = gameState.enemies.length - 1; eIndex >= 0; eIndex--) {
+                    const enemy = gameState.enemies[eIndex];
+                    if (enemy.isFiringLaser) {
+                        const enemyRad = enemy.rotation * (Math.PI / 180);
+                        const sX = enemy.x;
+                        const sY = enemy.y;
+                        const eX = sX + Math.sin(enemyRad) * LASER_LENGTH;
+                        const eY = sY - Math.cos(enemyRad) * LASER_LENGTH;
+                        
+                        // Check if remote player is hit by enemy laser
+                        if (pointToLineDistance(remote.x, remote.y, sX, sY, eX, eY) < 40) {
+                            const angleFromEnemyToPlayer = Math.atan2(enemy.y - remote.y, enemy.x - remote.x);
+                            const shipRad = (remote.rotation - 90) * (Math.PI/180);
+                            const localAngle = angleFromEnemyToPlayer - shipRad;
+                            
+                            const sector = getSectorFromAngle(localAngle);
+                            const sectorHealth = remote.shieldSectors[sector];
+                            
+                            // Only deal damage once per burst
+                            if (!enemy.laserHitRemotePlayer) {
+                                enemy.laserHitRemotePlayer = true;
+                                
+                                const baseDamage = 0.125 + Math.random() * 0.125;
+                                
+                                if (sectorHealth > 0) {
+                                    const shieldDamage = SECTOR_MAX_SHIELD * baseDamage;
+                                    const newShieldHealth = Math.max(0, sectorHealth - shieldDamage);
+                                    remote.shieldSectors[sector] = newShieldHealth;
+                                    
+                                    if (newShieldHealth <= 0 && sectorHealth > 0) {
+                                        const overflowDamage = shieldDamage - sectorHealth;
+                                        applyRemoteHullDamage(overflowDamage, sector, localAngle);
+                                    }
+                                    
+                                    const healthPct = newShieldHealth / SECTOR_MAX_SHIELD;
+                                    const hitColor = getShieldColor(healthPct);
+                                    remote.shieldHits.push({
+                                        sector: sector,
+                                        angle: localAngle,
+                                        intensity: Math.max(0.3, healthPct + 0.3),
+                                        color: hitColor
+                                    });
+                                } else {
+                                    const hullDamage = MAX_HULL * baseDamage;
+                                    applyRemoteHullDamage(hullDamage, sector, localAngle);
+                                }
+                            }
+                        } else {
+                            enemy.laserHitRemotePlayer = false;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Apply hull damage with sector-specific effects
+        function applyHullDamage(damage, sector, localAngle) {
+            const ship = gameState.ship;
+            
+            // Port/Starboard hits deal double damage and reduce speed
+            if (sector === 'port' || sector === 'starboard') {
+                damage *= 2;
+                ship.speedReduced = true;
+            }
+            
+            // Apply hull damage first (needed to calculate offline duration)
+            ship.hullHealth = Math.max(0, ship.hullHealth - damage);
+            
+            // Calculate offline duration: 5s at low damage (high hull), 30s at high damage (low hull)
+            // More hull damage = lower remaining hull = longer offline time
+            const hullPct = ship.hullHealth / MAX_HULL;
+            const offlineDuration = 5 + (1 - hullPct) * 25; // 5s at 100% hull, 30s at 0% hull
+            
+            // Front hits: chance to disable laser OR forward torpedoes, or affect targeting
+            if (sector === 'front') {
+                const roll = Math.random();
+                if (roll < 0.33) {
+                    ship.laserOfflineTimer = Math.max(ship.laserOfflineTimer, offlineDuration);
+                } else if (roll < 0.66) {
+                    ship.fwdTorpedoOfflineTimer = Math.max(ship.fwdTorpedoOfflineTimer, offlineDuration);
+                } else {
+                    ship.fwdTargetingTimer = Math.max(ship.fwdTargetingTimer, offlineDuration);
+                }
+            }
+            
+            // Aft hits: chance to disable aft torpedoes or affect aft targeting
+            if (sector === 'aft') {
+                if (Math.random() < 0.5) {
+                    ship.aftTorpedoOfflineTimer = Math.max(ship.aftTorpedoOfflineTimer, offlineDuration);
+                } else {
+                    ship.aftTargetingTimer = Math.max(ship.aftTargetingTimer, offlineDuration);
+                }
+            }
+            
+            // Create hull hit visual effect (sparks)
+            createHullHitEffect(ship.x, ship.y, localAngle);
+            
+            // Check for death
+            if (ship.hullHealth <= 0) {
+                destroyShip();
+            }
+        }
+        
+        // Apply hull damage to remote player (host only) and sync to client
+        function applyRemoteHullDamage(damage, sector, localAngle) {
+            const remote = networkState.remotePlayer;
+            if (!remote || !remote.alive) return;
+            
+            // Port/Starboard hits deal double damage
+            if (sector === 'port' || sector === 'starboard') {
+                damage *= 2;
+            }
+            
+            // Apply hull damage
+            remote.hullHealth = Math.max(0, remote.hullHealth - damage);
+            
+            // Create hull hit visual effect on host and queue for client
+            createHullHitEffect(remote.x, remote.y, localAngle);
+            networkState.pendingEffects.push({ type: 'hullHitEffect', x: remote.x, y: remote.y, angle: localAngle });
+            
+            // Send damage to client
+            sendRemoteDamage(sector, remote.shieldSectors[sector], remote.hullHealth);
+            
+            // Check for death
+            if (remote.hullHealth <= 0) {
+                remote.alive = false;
+                createExplosion(remote.x, remote.y, 0);
+                networkState.pendingEffects.push({ type: 'explosion', x: remote.x, y: remote.y, hullPercent: 0 });
+                if (networkState.remotePlayerEl) {
+                    networkState.remotePlayerEl.classList.add('spaceship-dead');
+                }
+                // If local player is also dead, show game over
+                if (!gameState.ship.alive) {
+                    gameOverEl.style.display = 'flex';
+                }
+            }
+        }
+        
+        // Send damage info to client (host only)
+        function sendRemoteDamage(sector, shieldRemaining, hullRemaining) {
+            if (networkState.socket && networkState.socket.readyState === WebSocket.OPEN) {
+                networkState.socket.send(JSON.stringify({
+                    type: 'REMOTE_DAMAGE',
+                    sector: sector,
+                    shieldRemaining: shieldRemaining,
+                    hullRemaining: hullRemaining
+                }));
+            }
+        }
+        
+        // Visual effect for hull hit (orange/red sparks)
+        function createHullHitEffect(x, y, angle) {
+            const sparkColors = ['#f97316', '#ef4444', '#fbbf24', '#ffffff'];
+            for (let i = 0; i < 15; i++) {
+                const spreadAngle = angle + (Math.random() - 0.5) * Math.PI * 0.5;
+                const speed = 50 + Math.random() * 80;
+                gameState.particles.push({
+                    x: x,
+                    y: y,
+                    dx: Math.cos(spreadAngle) * speed,
+                    dy: Math.sin(spreadAngle) * speed,
+                    life: 0.5,
+                    decay: 1.5,
+                    size: Math.random() * 3 + 1,
+                    color: sparkColors[Math.floor(Math.random() * sparkColors.length)]
+                });
+            }
+        }
+        
+        // Helper: Determine shield sector from local hit angle
+        function getSectorFromAngle(localAngle) {
+            // Convert to degrees, normalize to 0-360
+            let angle = ((localAngle * 180 / Math.PI) + 360) % 360;
+            // Front: 315-45 (ship nose is "up" at 0)
+            if (angle >= 315 || angle < 45) return 'front';
+            // Starboard (right): 45-135
+            if (angle >= 45 && angle < 135) return 'starboard';
+            // Aft (rear): 135-225
+            if (angle >= 135 && angle < 225) return 'aft';
+            // Port (left): 225-315
+            return 'port';
+        }
+        
+        // Helper: Get shield color based on health percentage
+        function getShieldColor(healthPct) {
+            if (healthPct >= 0.75) return '#22c55e'; // Green
+            if (healthPct >= 0.50) return '#eab308'; // Yellow
+            if (healthPct >= 0.25) return '#f97316'; // Orange
+            return '#ef4444'; // Red
+        }
+
+        // --- Shield & Effect Logic ---
+
+        function updateShields(dt) {
+            gameState.ship.shieldHits.forEach(hit => {
+                hit.intensity -= dt * SHIELD_DECAY;
+            });
+            gameState.ship.shieldHits = gameState.ship.shieldHits.filter(h => h.intensity > 0);
+        }
+
+        function drawShields() {
+            shieldCtx.clearRect(0, 0, 110, 110); 
+            
+            if (!gameState.ship.alive) return;
+            
+            // Check if at least one sector has shield
+            const anyShieldActive = Object.values(gameState.ship.shieldSectors).some(v => v > 0);
+            if (!anyShieldActive && gameState.ship.shieldHits.length === 0) return;
+
+            gameState.ship.shieldHits.forEach(hit => {
+                shieldCtx.save();
+                shieldCtx.translate(55, 55);
+                shieldCtx.rotate(hit.angle);
+                
+                let opacity = hit.intensity;
+                
+                shieldCtx.save();
+                shieldCtx.beginPath();
+                shieldCtx.arc(0, 0, 54, 0, Math.PI*2); 
+                shieldCtx.clip();
+                
+                // Use the color stored in the hit (already calculated at damage time)
+                const hexToRgb = (hex) => {
+                    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                    return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '255, 255, 255';
+                };
+                const shieldColorRgb = hexToRgb(hit.color);
+                
+                const grad = shieldCtx.createRadialGradient(0, -55, 5, 0, -40, 50);
+                grad.addColorStop(0, `rgba(255, 255, 255, ${opacity})`);
+                grad.addColorStop(0.4, `rgba(${shieldColorRgb}, ${opacity * 0.8})`);
+                grad.addColorStop(1, "transparent");
+                
+                shieldCtx.fillStyle = grad;
+                shieldCtx.fillRect(-55, -110, 110, 110);
+                
+                shieldCtx.restore();
+                shieldCtx.restore();
+            });
+        }
+        
+        // Update enemy shield glare effects
+        function updateEnemyShields(dt) {
+            gameState.enemies.forEach(enemy => {
+                enemy.shieldHits.forEach(hit => {
+                    hit.intensity -= dt * SHIELD_DECAY;
+                });
+                enemy.shieldHits = enemy.shieldHits.filter(h => h.intensity > 0);
+            });
+        }
+        
+        // Draw enemy shield glare effects
+        function drawEnemyShields() {
+            const hexToRgb = (hex) => {
+                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '255, 255, 255';
+            };
+            
+            gameState.enemies.forEach(enemy => {
+                const ctx = enemy.shieldCtx;
+                ctx.clearRect(0, 0, 110, 110);
+                
+                if (enemy.shieldHits.length === 0) return;
+                
+                enemy.shieldHits.forEach(hit => {
+                    ctx.save();
+                    ctx.translate(55, 55);
+                    ctx.rotate(hit.angle);
+                    
+                    const opacity = hit.intensity;
+                    
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 54, 0, Math.PI * 2);
+                    ctx.clip();
+                    
+                    const shieldColorRgb = hexToRgb(hit.color);
+                    
+                    const grad = ctx.createRadialGradient(0, -55, 5, 0, -40, 50);
+                    grad.addColorStop(0, `rgba(255, 255, 255, ${opacity})`);
+                    grad.addColorStop(0.4, `rgba(${shieldColorRgb}, ${opacity * 0.8})`);
+                    grad.addColorStop(1, 'transparent');
+                    
+                    ctx.fillStyle = grad;
+                    ctx.fillRect(-55, -110, 110, 110);
+                    
+                    ctx.restore();
+                    ctx.restore();
+                });
+            });
+        }
+
+        function render(now) {
+            const ship = gameState.ship;
+            shipEl.style.transform = `translate(${ship.x - 45}px, ${ship.y - 45}px) rotate(${ship.rotation}deg)`;
+            
+            // Update player laser length dynamically
+            if (ship.isFiringLaser) {
+                const laserHeight = ship.laserHitDistance || LASER_LENGTH;
+                laserEl.style.height = laserHeight + 'px';
+                laserEl.style.transform = `translateX(-50%) scaleY(1)`;
+            } else {
+                laserEl.style.height = '1000px';
+            }
+            
+            gameState.enemies.forEach(enemy => {
+                enemy.el.style.transform = `translate(${enemy.x - 45}px, ${enemy.y - 45}px) rotate(${enemy.rotation}deg)`;
+                
+                // Update enemy laser length dynamically
+                if (enemy.isFiringLaser && enemy.laserEl) {
+                    const laserHeight = enemy.laserHitDistance || LASER_LENGTH;
+                    enemy.laserEl.style.height = laserHeight + 'px';
+                    enemy.laserEl.style.transform = `translateX(-50%) scaleY(1)`;
+                } else if (enemy.laserEl) {
+                    enemy.laserEl.style.height = '1000px';
+                }
+            });
+            
+            // Render remote player (multiplayer)
+            if (networkState.isMultiplayer && networkState.remotePlayer && networkState.remotePlayerEl) {
+                const remote = networkState.remotePlayer;
+                networkState.remotePlayerEl.style.transform = `translate(${remote.x - 45}px, ${remote.y - 45}px)`;
+                
+                // Update remote ship image based on rotation (nearest 22.5° increment)
+                const imgIndex = Math.round((remote.rotation % 360) / 22.5) % 16;
+                const img = networkState.remotePlayerEl.querySelector('img');
+                if (img && networkState.remoteShipImages[imgIndex]) {
+                    img.src = networkState.remoteShipImages[imgIndex].data;
+                }
+                
+                // Remote player laser
+                const remoteLaser = networkState.remotePlayerEl.querySelector('.laser-beam');
+                if (remoteLaser) {
+                    if (remote.isFiringLaser) {
+                        remoteLaser.classList.add('laser-active');
+                    } else {
+                        remoteLaser.classList.remove('laser-active');
+                    }
+                }
+            }
+
+            const updateProj = (t) => {
+                 t.el.style.transform = `translate(${t.x - 4}px, ${t.y - 10}px) rotate(${t.rotation}deg)`;
+            };
+            gameState.torpedoes.forEach(updateProj);
+            gameState.enemyTorpedoes.forEach(updateProj);
+
+            // Draw Particles & Global FX
+            effectsCtx.clearRect(0, 0, effectsCanvas.width, effectsCanvas.height);
+            gameState.particles.forEach(p => {
+                effectsCtx.globalAlpha = p.life;
+                effectsCtx.fillStyle = p.color;
+                effectsCtx.beginPath();
+                effectsCtx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+                effectsCtx.fill();
+            });
+            effectsCtx.globalAlpha = 1.0;
+            
+            // Draw explosion rings
+            drawExplosionRings();
+
+            drawShields();
+            drawEnemyShields();
+
+            // Enemy Pips
+            const enemyCount = gameState.enemies.length;
+            if (enemyCount === 0) {
+                enemyPips.innerHTML = '<span class="text-green-500 text-[10px]">CLEAR</span>';
+            } else {
+                let pipsHtml = '';
+                for (let i = 0; i < enemyCount; i++) {
+                    pipsHtml += '<div class="w-2 h-2 rounded-full bg-red-500"></div>';
+                }
+                enemyPips.innerHTML = pipsHtml;
+            }
+            
+            // Update mini-ship shield diagram colors
+            function getShieldSectorColor(health, maxHealth) {
+                if (health <= 0) return '#4b5563'; // Grey - collapsed
+                const pct = health / maxHealth;
+                if (pct > 0.75) return '#22c55e'; // Green
+                if (pct > 0.5) return '#eab308';  // Yellow
+                if (pct > 0.25) return '#f97316'; // Orange
+                return '#ef4444'; // Red
+            }
+            
+            const sectors = ship.shieldSectors;
+            shieldFrontEl.setAttribute('fill', getShieldSectorColor(sectors.front, SECTOR_MAX_SHIELD));
+            shieldAftEl.setAttribute('fill', getShieldSectorColor(sectors.aft, SECTOR_MAX_SHIELD));
+            shieldPortEl.setAttribute('fill', getShieldSectorColor(sectors.port, SECTOR_MAX_SHIELD));
+            shieldStarboardEl.setAttribute('fill', getShieldSectorColor(sectors.starboard, SECTOR_MAX_SHIELD));
+            
+            // Laser Status HUD with bar
+            if (ship.laserOfflineTimer > 0) {
+                const timeLeft = Math.ceil(ship.laserOfflineTimer);
+                hudLaser.textContent = `OFF ${timeLeft}s`;
+                hudLaser.className = 'w-12 text-right text-[10px] text-red-600';
+                laserBar.style.width = '0%';
+                laserBar.className = 'h-full transition-all duration-100 bg-red-600';
+            } else if (ship.isFiringLaser) {
+                hudLaser.textContent = "FIRE";
+                hudLaser.className = 'w-12 text-right text-[10px] text-green-400';
+                const burstPct = (ship.laserBurstTimer / LASER_BURST_DURATION) * 100;
+                laserBar.style.width = burstPct + '%';
+                laserBar.className = 'h-full transition-all duration-100 bg-green-400';
+            } else if (!ship.laserReady) {
+                const rechargePct = ((LASER_RECHARGE_TIME - ship.laserRechargeTimer) / LASER_RECHARGE_TIME) * 100;
+                hudLaser.textContent = `${Math.ceil(ship.laserRechargeTimer)}s`;
+                hudLaser.className = 'w-12 text-right text-[10px] text-orange-400';
+                laserBar.style.width = rechargePct + '%';
+                laserBar.className = 'h-full transition-all duration-100 bg-orange-400';
+            } else {
+                hudLaser.textContent = "READY";
+                hudLaser.className = 'w-12 text-right text-[10px] text-cyan-400';
+                laserBar.style.width = '100%';
+                laserBar.className = 'h-full transition-all duration-100 bg-cyan-400';
+            }
+            
+            // Forward Torpedo Pips
+            let fwdPipsHtml = '';
+            for (let i = 0; i < MAX_FORWARD_TORPEDOES; i++) {
+                if (ship.fwdTorpedoOfflineTimer > 0) {
+                    fwdPipsHtml += '<div class="w-1 h-2 rounded-sm bg-red-600"></div>';
+                } else if (i < ship.forwardTorpedoes) {
+                    fwdPipsHtml += '<div class="w-1 h-2 rounded-sm bg-green-500"></div>';
+                } else {
+                    fwdPipsHtml += '<div class="w-1 h-2 rounded-sm bg-slate-600"></div>';
+                }
+            }
+            fwdTorpPips.innerHTML = fwdPipsHtml;
+            
+            // Aft Torpedo Pips
+            let aftPipsHtml = '';
+            for (let i = 0; i < MAX_AFT_TORPEDOES; i++) {
+                if (ship.aftTorpedoOfflineTimer > 0) {
+                    aftPipsHtml += '<div class="w-1 h-2 rounded-sm bg-red-600"></div>';
+                } else if (i < ship.aftTorpedoes) {
+                    aftPipsHtml += '<div class="w-1 h-2 rounded-sm bg-green-500"></div>';
+                } else {
+                    aftPipsHtml += '<div class="w-1 h-2 rounded-sm bg-slate-600"></div>';
+                }
+            }
+            aftTorpPips.innerHTML = aftPipsHtml;
+            
+            // Hull Status with health bar
+            const hullPct = Math.round((ship.hullHealth / MAX_HULL) * 100);
+            hudHull.textContent = hullPct;
+            hullBar.style.width = hullPct + '%';
+            
+            // Color based on health
+            if (hullPct <= 25) {
+                hudHull.className = 'w-8 text-right text-red-500';
+                hullBar.className = 'h-full transition-all duration-200 bg-red-500';
+            } else if (hullPct <= 50) {
+                hudHull.className = 'w-8 text-right text-orange-400';
+                hullBar.className = 'h-full transition-all duration-200 bg-orange-400';
+            } else if (hullPct <= 75) {
+                hudHull.className = 'w-8 text-right text-yellow-400';
+                hullBar.className = 'h-full transition-all duration-200 bg-yellow-400';
+            } else {
+                hudHull.className = 'w-8 text-right text-green-500';
+                hullBar.className = 'h-full transition-all duration-200 bg-green-500';
+            }
+            
+            if (gameState.enemies.length === 0 && Math.random() < 0.01 && ship.alive) spawnEnemy();
+        }
+
+        function pointToLineDistance(px, py, x1, y1, x2, y2) {
+            const A = px - x1, B = py - y1, C = x2 - x1, D = y2 - y1;
+            const dot = A * C + B * D;
+            const lenSq = C * C + D * D;
+            let param = -1;
+            if (lenSq !== 0) param = dot / lenSq;
+            let xx, yy;
+            if (param < 0) { xx = x1; yy = y1; }
+            else if (param > 1) { xx = x2; yy = y2; }
+            else { xx = x1 + param * C; yy = y1 + param * D; }
+            const dx = px - xx, dy = py - yy;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        // Game loop is started by startGame() from menu - do not auto-start here
+
+    </script>
+</body>
+</html>
