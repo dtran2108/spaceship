@@ -927,7 +927,10 @@
             networkState.remotePlayerEl = el;
             networkState.remotePlayer = {
                 id: networkState.isHost ? 'player_client' : 'player_host',
-                x: networkState.gameWidth / 2 + 100,
+                // Position remote player where their local ship is:
+                // If we're host, remote (client) is at center+100
+                // If we're client, remote (host) is at center-100
+                x: networkState.isHost ? networkState.gameWidth / 2 + 100 : networkState.gameWidth / 2 - 100,
                 y: networkState.gameHeight / 2,
                 rotation: 0,
                 targetRotation: 0,
@@ -1294,7 +1297,27 @@
             networkState.isMultiplayer = isMultiplayer;
             
             if (isMultiplayer) {
+                // Set initial positions for multiplayer:
+                // Host ship at center-100, Client ship at center+100
+                const gameW = networkState.gameWidth;
+                const gameH = networkState.gameHeight;
+                
+                console.log(`[startGame] isHost: ${networkState.isHost}, gameW: ${gameW}, gameH: ${gameH}`);
+                
+                if (networkState.isHost) {
+                    // Host's local ship is on the left side
+                    gameState.ship.x = gameW / 2 - 100;
+                    gameState.ship.y = gameH / 2;
+                    console.log(`[Host] Local ship at: ${gameState.ship.x}, ${gameState.ship.y}`);
+                } else {
+                    // Client's local ship is on the right side
+                    gameState.ship.x = gameW / 2 + 100;
+                    gameState.ship.y = gameH / 2;
+                    console.log(`[Client] Local ship at: ${gameState.ship.x}, ${gameState.ship.y}`);
+                }
+                
                 createRemotePlayer();
+                console.log(`[startGame] Remote player at: ${networkState.remotePlayer.x}, ${networkState.remotePlayer.y}`);
             }
             
             // Initialize canvases
